@@ -1,8 +1,13 @@
 #!/bin/bash
 set -e
 
-echo "=== 安装 Python 依赖（使用预编译包）==="
+echo "=== 更新包索引 ==="
 pip install --upgrade pip
-pip install --no-cache-dir --only-binary=:all: -r requirements.txt
+
+echo "=== 安装 Python 依赖 ==="
+pip install --no-cache-dir -r requirements.txt
+
+echo "=== 清理缓存 ==="
+rm -rf /tmp/pip* ~/.cache/pip
 
 echo "=== 构建成功 ==="
