@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: trading-system
+    plan: standard  # 明确使用付费计划
+    region: frankfurt  # 选择靠近您的区域
+    env: python
+    build:
+      resources:
+        cpu: 2
+        memory: 2Gi  # 确保足够内存用于编译
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: python src/main.py

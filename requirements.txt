@@ -1,7 +1,7 @@
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
-python-binance==1.0.22  # 保持您的核心交易依赖
-pandas==2.2.2
+python-binance==1.0.22
+pandas==2.2.4  # 最新2.2.x版本
 numpy==1.26.4
 httpx==0.27.0
 sqlalchemy==2.0.29
