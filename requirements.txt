@@ -1,0 +1,12 @@
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-telegram-bot==20.6
+ccxt==4.2.7
+pydantic==2.5.3
+aiosqlite==0.20.0
+python-dotenv==1.0.0
+pandas==2.1.4
+numpy==1.26.3
+requests==2.31.0
+# 移除 pandas-ta
+talib-binary==0.4.28  # 添加 TA-Lib 的二进制版本
