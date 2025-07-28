@@ -1,10 +1,15 @@
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-python-binance==1.0.22
-pandas==2.2.3  # 使用可用的最新2.2.x版本
+# 使用 cat 命令一次性创建正确的文件
+cat > requirements.txt << 'EOL'
+fastapi==0.110.0
+uvicorn[standard]==0.25.0
+pandas==2.1.4
 numpy==1.26.4
-httpx==0.27.0
-sqlalchemy==2.0.29
-aiosqlite==0.20.0
-apscheduler==4.0.0
+TA-Lib==0.4.28
+python-telegram-bot==20.8
+aiosqlite==0.19.0
+apscheduler==3.10.4
 python-dotenv==1.0.1
+pydantic==2.5.3
+httpx==0.26.0
+ccxt==4.2.58
+EOL
