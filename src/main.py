@@ -34,3 +34,15 @@ def root():
     }
 
 # 您的交易路由和逻辑...
+@app.get("/test-telegram")
+async def test_telegram():
+    from src.telegram_bot import send_message  # 确保路径正确
+    await send_message("🔥 测试消息：交易系统运行正常！")
+    return {"status": "测试消息已发送"}
+
+# 添加的Telegram测试路由
+@app.get("/test-telegram")
+async def test_telegram():
+    from src.telegram_bot import send_message
+    success = await send_message("🚀 测试消息：交易系统运行正常！")
+    return {"status": "success" if success else "error"}
