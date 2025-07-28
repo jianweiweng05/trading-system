@@ -1,4 +1,3 @@
-# 使用 cat 命令一次性创建正确的文件
 cat > requirements.txt << 'EOL'
 fastapi==0.110.0
 uvicorn[standard]==0.25.0
