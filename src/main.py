@@ -53,3 +53,22 @@ async def telegram_status():
         "token_set": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
         "chat_id_set": bool(os.getenv("TELEGRAM_CHAT_ID"))
     }
+
+@app.get("/last-log")
+async def get_last_log():
+    import logging
+    from io import StringIO
+    
+    # 捕获最近日志
+    log_stream = StringIO()
+    handler = logging.StreamHandler(log_stream)
+    logger = logging.getLogger()
+    logger.addHandler(handler)
+    
+    # 触发日志记录
+    from src.telegram_bot import send_message
+    await send_message("测试日志端点消息")
+    
+    # 获取日志内容
+    logger.removeHandler(handler)
+    return {"log": log_stream.getvalue()}
