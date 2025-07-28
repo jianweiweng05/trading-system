@@ -1,31 +1,13 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Environment
+# 环境文件
 .env
 
-# Database
+# 数据库文件
 *.db
 *.sqlite
 
-# Logs
-*.log
-logs/
+# Python缓存
+__pycache__/
+*.pyc
 
-# macOS
-.DS_Store
-
-# IDE
-.idea/
-.vscode/
-
-# Virtual environment
-venv/
-
-# Test artifacts
-*.bak
-*.backup.db
-test-env/
+# API密钥
+*_key.txt

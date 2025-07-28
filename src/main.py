@@ -25,3 +25,11 @@ async def health_check():
     return {"status": "ok"}
 
 # 您的其他路由...
+import os
+# 必须在所有导入之前设置环境变量
+os.environ["PYTHONWARNINGS"] = "ignore"
+os.environ["PYDANTIC_DISABLE_WARNINGS"] = "1"
+import os
+# 必须在所有导入之前设置环境变量
+os.environ["PYTHONWARNINGS"] = "ignore"
+os.environ["PYDANTIC_DISABLE_WARNINGS"] = "1"

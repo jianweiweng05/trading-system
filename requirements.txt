@@ -1,10 +1,9 @@
 fastapi==0.110.0
 uvicorn[standard]==0.25.0
-# 移除 pandas 依赖
 python-binance==1.0.22
 sqlalchemy==1.4.46
 aiosqlite==0.19.0
 apscheduler==3.10.4
 python-dotenv==1.0.1
-pydantic==1.10.14
+pydantic==1.10.14  # 明确指定兼容版本
 httpx==0.26.0
