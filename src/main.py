@@ -46,3 +46,10 @@ async def test_telegram():
     from src.telegram_bot import send_message
     success = await send_message("🚀 测试消息：交易系统运行正常！")
     return {"status": "success" if success else "error"}
+
+@app.get("/telegram-status")
+async def telegram_status():
+    return {
+        "token_set": bool(os.getenv("TELEGRAM_BOT_TOKEN")),
+        "chat_id_set": bool(os.getenv("TELEGRAM_CHAT_ID"))
+    }
