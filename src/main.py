@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import asyncio
+import traceback
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -10,7 +11,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional
 
 # 添加当前目录到 Python 路径
-sys.path.append(os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # 导入自定义模块
 from config import (
@@ -49,50 +50,63 @@ SYSTEM_HALTED = False
 @app.on_event("startup")
 async def startup_event():
     """应用启动初始化"""
+    print(">>> [Startup] STARTING application initialization...")
     try:
         # 打印系统配置
         print("=" * 40)
-        print("系统配置信息:")
+        print(">>> [Startup] System Configuration:")
         print(f"Telegram Token: {TELEGRAM_BOT_TOKEN[:6]}...{TELEGRAM_BOT_TOKEN[-5:]}")
         print(f"Admin Chat ID: {ADMIN_CHAT_ID}")
         print(f"TV Webhook Secret: {TV_WEBHOOK_SECRET[:6]}...{TV_WEBHOOK_SECRET[-5:]}")
         print(f"Binance API Key: {BINANCE_API_KEY[:6]}...{BINANCE_API_KEY[-5:]}")
         print(f"Base Leverage: {BASE_LEVERAGE}")
         print(f"Initial Sim Balance: {INITIAL_SIM_BALANCE}")
-        print(f"Database URL: {DATABASE_URL}")
+        print(f"Database URL: {DATABASE_URL[:20]}...")  # 只显示部分数据库URL
         print(f"Run Mode: {RUN_MODE}")
         print(f"Debug Mode: {DEBUG_MODE}")
         print("=" * 40)
         
         # 初始化数据库
+        print(">>> [Startup Step 1/5] PREPARING to initialize database...")
         await init_db()
+        print(">>> [Startup Step 2/5] SUCCESS: Database initialized.")
         logger.info("数据库初始化完成")
         
         # 初始化交易所
+        print(">>> [Startup Step 3/5] PREPARING to create exchange instance...")
         app.state.exchange = ccxt.binance({
             'apiKey': BINANCE_API_KEY,
             'secret': BINANCE_API_SECRET,
             'enableRateLimit': True,
             'options': {'defaultType': 'future'}
         })
+        print(">>> [Startup Step 4/5] SUCCESS: Exchange instance created.")
         logger.info("交易所实例创建完成")
         
         # 初始化交易模块
+        print(">>> [Startup Step 5/5] PREPARING to initialize broker...")
         await initialize_broker(app.state.exchange, RUN_MODE)
+        print(">>> [Startup] SUCCESS: Broker initialized.")
         logger.info("交易模块初始化完成")
         
         # 启动Telegram机器人
+        print(">>> [Startup] PREPARING to start Telegram bot...")
         asyncio.create_task(start_telegram_bot())
+        print(">>> [Startup] SUCCESS: Telegram bot task created.")
         logger.info("Telegram机器人已启动")
         
         # 设置运行模式
         app.state.run_mode = RUN_MODE
         
         # 系统启动完成
+        print(">>> [Startup] ALL INITIALIZATION COMPLETE! Application should be live.")
         logger.info("系统启动完成")
         
     except Exception as e:
-        logger.error(f"启动失败: {e}")
+        print(f">>> [Startup FATAL ERROR] An exception occurred during startup: {e}")
+        print(">>> [Startup FATAL ERROR] Full traceback:")
+        traceback.print_exc()
+        logger.error(f"启动失败: {e}", exc_info=True)
         raise
 
 # ================= 健康检查端点 =================
@@ -229,7 +243,7 @@ async def get_trades(symbol: Optional[str] = None, limit: int = 100):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """全局异常处理"""
-    logger.error(f"全局异常: {str(exc)}")
+    logger.error(f"全局异常: {str(exc)}", exc_info=True)
     return JSONResponse(
         status_code=500,
         content={"status": "error", "message": "Internal server error"}
