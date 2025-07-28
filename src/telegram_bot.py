@@ -6,36 +6,32 @@ logger = logging.getLogger(__name__)
 
 async def send_message(text: str):
     try:
-        # 1. 获取环境变量
-        token = os.getenv("TELEGRAM_BOT_TOKEN")
-        chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        # 终极解决方案：直接从系统环境获取
+        token = os.environ['TELEGRAM_BOT_TOKEN']
+        chat_id = os.environ['TELEGRAM_CHAT_ID']
         
-        # 2. 验证参数
-        if not token or not chat_id:
-            logger.error("无法发送：缺少TOKEN或CHAT_ID")
-            return False
-        
-        # 3. 准备请求
         url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML"  # 关键修复：添加HTML解析模式
-        }
         
-        # 4. 发送请求（增加超时时间）
+        # 添加详细日志
+        logger.info("正在发送Telegram消息...")
+        
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(url, json=payload)
+            response = await client.post(url, json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "Markdown"
+            })
             
-            # 5. 记录详细响应
-            logger.info(f"Telegram响应: {response.status_code} {response.text}")
+            # 记录关键信息
+            logger.info(f"Telegram响应: {response.status_code}")
+            if response.status_code != 200:
+                logger.error(f"发送失败: {response.text}")
             
-            response.raise_for_status()
-            return True
+            return response.status_code == 200
             
-    except httpx.HTTPStatusError as e:
-        logger.error(f"Telegram API错误: {e.response.status_code} {e.response.text}")
+    except KeyError:
+        logger.error("环境变量未设置: TELEGRAM_BOT_TOKEN 或 TELEGRAM_CHAT_ID")
         return False
     except Exception as e:
-        logger.error(f"发送失败: {str(e)}")
+        logger.error(f"严重错误: {str(e)}")
         return False

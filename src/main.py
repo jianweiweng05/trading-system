@@ -79,3 +79,17 @@ async def check_telegram_env():
         "TELEGRAM_BOT_TOKEN_exists": "TELEGRAM_BOT_TOKEN" in os.environ,
         "TELEGRAM_CHAT_ID_exists": "TELEGRAM_CHAT_ID" in os.environ
     }
+
+# Telegram测试端点
+@app.get("/ultimate-test")
+async def ultimate_test():
+    from src.telegram_bot import send_message
+    success = await send_message("🚀 *终极测试成功！*")
+    return {"status": "success" if success else "error"}
+
+@app.get("/telegram-debug")
+async def telegram_debug():
+    return {
+        "token_set": "TELEGRAM_BOT_TOKEN" in os.environ,
+        "chat_id_set": "TELEGRAM_CHAT_ID" in os.environ
+    }
