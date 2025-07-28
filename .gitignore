@@ -28,3 +28,4 @@ venv/
 # Test artifacts
 *.bak
 *.backup.db
+test-env/
