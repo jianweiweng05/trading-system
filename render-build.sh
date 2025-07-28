@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-echo "=== 检查Python版本 ==="
-python --version
-
 echo "=== 安装系统依赖 ==="
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -o Acquire::Check-Valid-Until=false -o Acquire::Check-Date=false
