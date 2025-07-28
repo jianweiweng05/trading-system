@@ -1,35 +1,36 @@
 import os
-import time
+import logging
 from fastapi import FastAPI
+from dotenv import load_dotenv
 
-# 添加启动日志
-print(">>> 应用启动中...")
+# 加载环境变量
+load_dotenv()
 
-# 确保应用快速响应健康检查
-app = FastAPI()
+# 配置日志
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=log_level)
+logger = logging.getLogger(__name__)
 
-@app.on_event("startup")
-async def startup_event():
-    # 将初始化操作放入后台线程
-    import threading
-    threading.Thread(target=initialize_system, daemon=True).start()
+# 创建应用实例
+app = FastAPI(debug=os.getenv("DEBUG_MODE", "False").lower() == "true")
 
-def initialize_system():
-    # 您的初始化代码放在这里
-    print(">>> 后台初始化开始...")
-    time.sleep(5)  # 模拟初始化延迟
-    print(">>> 后台初始化完成")
+# 打印环境配置
+logger.info(f"运行模式: {os.getenv('RUN_MODE', 'live')}")
+logger.info(f"基础杠杆率: {os.getenv('BASE_LEVERAGE', '10')}")
+logger.info(f"数据库URL: {os.getenv('DATABASE_URL')}")
 
+# 正确的健康检查端点
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    return {"status": "ok", "message": "服务运行正常"}
 
-# 您的其他路由...
-import os
-# 必须在所有导入之前设置环境变量
-os.environ["PYTHONWARNINGS"] = "ignore"
-os.environ["PYDANTIC_DISABLE_WARNINGS"] = "1"
-import os
-# 必须在所有导入之前设置环境变量
-os.environ["PYTHONWARNINGS"] = "ignore"
-os.environ["PYDANTIC_DISABLE_WARNINGS"] = "1"
+@app.get("/")
+def root():
+    return {
+        "status": "running",
+        "mode": os.getenv("RUN_MODE"),
+        "leverage": os.getenv("BASE_LEVERAGE"),
+        "health_check": "/health"
+    }
+
+# 您的交易路由和逻辑...
