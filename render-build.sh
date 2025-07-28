@@ -1,10 +1,12 @@
 #!/bin/bash
 set -e
+
+echo "=== 安装系统依赖 ==="
+apt-get update
+apt-get install -y build-essential
+
+echo "=== 安装Python依赖 ==="
 pip install --upgrade pip
-python -m venv venv
-source venv/bin/activate
-echo "=== 安装 TA-Lib 系统依赖 ==="
-apt-get update -y && apt-get install -y --no-install-recommends build-essential libta-lib-dev
-echo "=== 智能安装 Python 依赖 (强制使用二进制包) ==="
-pip install --no-cache-dir --only-binary ":all:" -r requirements.txt
-echo "=== 构建成功！ ==="
+pip install --no-cache-dir -r requirements.txt
+
+echo "=== 构建成功 ==="
