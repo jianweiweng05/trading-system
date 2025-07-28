@@ -72,3 +72,10 @@ async def get_last_log():
     # 获取日志内容
     logger.removeHandler(handler)
     return {"log": log_stream.getvalue()}
+
+@app.get("/check-telegram-env")
+async def check_telegram_env():
+    return {
+        "TELEGRAM_BOT_TOKEN_exists": "TELEGRAM_BOT_TOKEN" in os.environ,
+        "TELEGRAM_CHAT_ID_exists": "TELEGRAM_CHAT_ID" in os.environ
+    }
