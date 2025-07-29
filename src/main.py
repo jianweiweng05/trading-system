@@ -93,3 +93,35 @@ async def telegram_debug():
         "token_set": "TELEGRAM_BOT_TOKEN" in os.environ,
         "chat_id_set": "TELEGRAM_CHAT_ID" in os.environ
     }
+from fastapi import Request
+
+@app.get("/button-test")
+async def button_test():
+    from src.telegram_bot import send_message
+    buttons = [
+        ["按钮1", "action_1"],
+        ["按钮2", "action_2"]
+    ]
+    await send_message("请点击按钮测试:", buttons)
+    return {"status": "按钮测试已发送"}
+
+@app.post("/telegram-callback")
+async def telegram_callback(request: Request):
+    data = await request.json()
+    logger.info(f"收到按钮回调: {data}")
+    
+    callback_data = data.get("callback_query", {}).get("data")
+    
+    if callback_data == "action_1":
+        return {"status": "操作1执行成功"}
+    elif callback_data == "action_2":
+        return {"status": "操作2执行成功"}
+    
+    return {"status": "未知操作"}
+
+from fastapi import Request
+
+@app.post("/telegram-callback")
+async def telegram_callback(request: Request):
+    return {"status": "回调永久修复成功！"}
+
