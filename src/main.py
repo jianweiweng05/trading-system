@@ -1,6 +1,6 @@
 import os
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from dotenv import load_dotenv
 
 # 加载环境变量
@@ -19,7 +19,7 @@ logger.info(f"运行模式: {os.getenv('RUN_MODE', 'live')}")
 logger.info(f"基础杠杆率: {os.getenv('BASE_LEVERAGE', '10')}")
 logger.info(f"数据库URL: {os.getenv('DATABASE_URL')}")
 
-# 正确的健康检查端点
+# 健康检查端点
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "message": "服务运行正常"}
@@ -33,20 +33,7 @@ def root():
         "health_check": "/health"
     }
 
-# 您的交易路由和逻辑...
-@app.get("/test-telegram")
-async def test_telegram():
-    from src.telegram_bot import send_message  # 确保路径正确
-    await send_message("🔥 测试消息：交易系统运行正常！")
-    return {"status": "测试消息已发送"}
-
-# 添加的Telegram测试路由
-@app.get("/test-telegram")
-async def test_telegram():
-    from src.telegram_bot import send_message
-    success = await send_message("🚀 测试消息：交易系统运行正常！")
-    return {"status": "success" if success else "error"}
-
+# Telegram 相关端点
 @app.get("/telegram-status")
 async def telegram_status():
     return {
@@ -54,46 +41,11 @@ async def telegram_status():
         "chat_id_set": bool(os.getenv("TELEGRAM_CHAT_ID"))
     }
 
-@app.get("/last-log")
-async def get_last_log():
-    import logging
-    from io import StringIO
-    
-    # 捕获最近日志
-    log_stream = StringIO()
-    handler = logging.StreamHandler(log_stream)
-    logger = logging.getLogger()
-    logger.addHandler(handler)
-    
-    # 触发日志记录
+@app.get("/test-telegram")
+async def test_telegram():
     from src.telegram_bot import send_message
-    await send_message("测试日志端点消息")
-    
-    # 获取日志内容
-    logger.removeHandler(handler)
-    return {"log": log_stream.getvalue()}
-
-@app.get("/check-telegram-env")
-async def check_telegram_env():
-    return {
-        "TELEGRAM_BOT_TOKEN_exists": "TELEGRAM_BOT_TOKEN" in os.environ,
-        "TELEGRAM_CHAT_ID_exists": "TELEGRAM_CHAT_ID" in os.environ
-    }
-
-# Telegram测试端点
-@app.get("/ultimate-test")
-async def ultimate_test():
-    from src.telegram_bot import send_message
-    success = await send_message("🚀 *终极测试成功！*")
+    success = await send_message("🚀 测试消息：交易系统运行正常！")
     return {"status": "success" if success else "error"}
-
-@app.get("/telegram-debug")
-async def telegram_debug():
-    return {
-        "token_set": "TELEGRAM_BOT_TOKEN" in os.environ,
-        "chat_id_set": "TELEGRAM_CHAT_ID" in os.environ
-    }
-from fastapi import Request
 
 @app.get("/button-test")
 async def button_test():
@@ -107,21 +59,24 @@ async def button_test():
 
 @app.post("/telegram-callback")
 async def telegram_callback(request: Request):
-    data = await request.json()
-    logger.info(f"收到按钮回调: {data}")
-    
-    callback_data = data.get("callback_query", {}).get("data")
-    
-    if callback_data == "action_1":
-        return {"status": "操作1执行成功"}
-    elif callback_data == "action_2":
-        return {"status": "操作2执行成功"}
-    
-    return {"status": "未知操作"}
+    try:
+        data = await request.json()
+        logger.info(f"收到Telegram回调: {data}")
+        
+        callback_data = data.get("callback_query", {}).get("data")
+        
+        if callback_data == "action_1":
+            return {"status": "操作1执行成功"}
+        elif callback_data == "action_2":
+            return {"status": "操作2执行成功"}
+        
+        return {"status": "未知操作"}
+    except Exception as e:
+        logger.error(f"回调处理失败: {str(e)}")
+        return {"status": "error", "detail": str(e)}
 
-from fastapi import Request
-
-@app.post("/telegram-callback")
-async def telegram_callback(request: Request):
-    return {"status": "回调永久修复成功！"}
-
+# 启动服务器
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
