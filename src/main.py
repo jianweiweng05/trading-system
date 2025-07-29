@@ -33,7 +33,7 @@ def root():
         "health_check": "/health"
     }
 
-# Telegram 相关端点
+# Telegram 状态检查
 @app.get("/telegram-status")
 async def telegram_status():
     return {
@@ -41,22 +41,25 @@ async def telegram_status():
         "chat_id_set": bool(os.getenv("TELEGRAM_CHAT_ID"))
     }
 
+# 消息测试端点
 @app.get("/test-telegram")
 async def test_telegram():
     from src.telegram_bot import send_message
     success = await send_message("🚀 测试消息：交易系统运行正常！")
     return {"status": "success" if success else "error"}
 
+# 按钮测试端点（永久修复版）
 @app.get("/button-test")
 async def button_test():
-    from src.telegram_bot import send_message
+    from src.telegram_bot import send_message_with_buttons
     buttons = [
-        ["按钮1", "action_1"],
-        ["按钮2", "action_2"]
+        [{"text": "按钮1", "callback_data": "action_1"}],
+        [{"text": "按钮2", "callback_data": "action_2"}]
     ]
-    await send_message("请点击按钮测试:", buttons)
-    return {"status": "按钮测试已发送"}
+    success = await send_message_with_buttons("请点击按钮测试:", buttons)
+    return {"status": "按钮测试已发送" if success else "发送失败"}
 
+# Telegram回调处理（永久修复版）
 @app.post("/telegram-callback")
 async def telegram_callback(request: Request):
     try:
