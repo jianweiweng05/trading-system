@@ -2,9 +2,11 @@
 numpy==1.24.4
 pandas==1.5.3
 pandas-ta==0.3.14b0
-ccxt==4.3.30
 fastapi==0.110.0
 uvicorn[standard]==0.29.0
+python-telegram-bot[ext]==21.0.1
 sqlalchemy==1.4.46
 aiosqlite==0.19.0
-python-telegram-bot[ext]==21.0.1
+ccxt==4.3.30
+pandas>=1.5.0,<2.0
+numpy>=1.24.0,<1.25
