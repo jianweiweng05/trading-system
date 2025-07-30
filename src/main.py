@@ -3,6 +3,7 @@ import sys
 import time
 import hmac
 import hashlib
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 import ccxt.async_support as ccxt
@@ -79,7 +80,8 @@ async def lifespan(app: FastAPI):
         yield
     except Exception as e:
         logger.critical(f"系统启动失败: {str(e)}", exc_info=True)
-        # sys.exit(1) # 在生产环境中可以取消注释
+        # 在生产环境中可以取消注释
+        # sys.exit(1)
     
     # 关闭
     logger.info("系统正在关闭...")
@@ -136,3 +138,9 @@ async def tradingview_webhook(request: Request):
     except Exception as e:
         logger.error(f"信号处理失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=400, detail="信号格式错误或处理异常")
+
+# --- 6. 启动服务器 ---
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("src.main:app", host="0.0.0.0", port=port, reload=False)
