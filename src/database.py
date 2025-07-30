@@ -1,18 +1,19 @@
 import logging
-from datetime import datetime
+import os
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import (
     Table, Column, Integer, String, Float, DateTime, MetaData, insert, select, update, func
 )
 
 # 导入全局配置
-from config import DB_FILE, LOG_LEVEL
+from config import CONFIG
 
 logger = logging.getLogger(__name__)
 
 # --- 1. 数据库引擎与元数据 ---
-DATABASE_URL = f"sqlite+aiosqlite:///{DB_FILE}"
-engine = create_async_engine(DATABASE_URL, echo=LOG_LEVEL == "DEBUG")
+# 使用 CONFIG.db_path 获取数据库路径
+DATABASE_URL = f"sqlite+aiosqlite:///{CONFIG.db_path}"
+engine = create_async_engine(DATABASE_URL, echo=CONFIG.log_level == "DEBUG")
 metadata = MetaData()
 
 # --- 2. 定义所有数据表 (SQLAlchemy Schema) ---
@@ -30,11 +31,14 @@ trades = Table(
     Column('updated_at', DateTime, default=func.now(), onupdate=func.now())
 )
 
-# ... (未来可以增加其他表)
-
 # --- 3. 数据库初始化与健康检查 ---
 async def init_db():
     """异步创建所有定义的表"""
+    # 确保数据库目录存在
+    db_dir = os.path.dirname(CONFIG.db_path)
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir, exist_ok=True)
+    
     async with engine.begin() as conn:
         logger.info("正在创建/验证数据库表...")
         await conn.run_sync(metadata.create_all)
@@ -65,8 +69,7 @@ async def log_trade(symbol: str, quantity: float, entry_price: float, trade_type
             )
             result = await conn.execute(stmt)
             await conn.commit()
-            # SQLAlchemy 2.0 语法适配
-            trade_id = result.inserted_primary_key.id if result.inserted_primary_key else -1
+            trade_id = result.inserted_primary_key[0]
             logger.info(f"交易记录已存入数据库, ID: {trade_id}")
             return trade_id
         except Exception as e:
@@ -85,7 +88,8 @@ async def close_trade(trade_id: int, exit_price: float) -> bool:
     """平仓一笔交易，更新状态和退出价格，并返回操作状态。"""
     async with engine.connect() as conn:
         try:
-            async with conn.begin():
+            async with conn.begin(): # 开始事务
+                # 检查交易是否存在且是OPEN状态
                 check_stmt = select(trades).where(
                     (trades.c.id == trade_id) & 
                     (trades.c.status == 'OPEN')
@@ -95,10 +99,11 @@ async def close_trade(trade_id: int, exit_price: float) -> bool:
                     logger.warning(f"交易 {trade_id} 不存在或已被平仓，无需操作。")
                     return False
                 
+                # 更新交易状态和退出价格
                 update_stmt = (
                     update(trades)
                     .where(trades.c.id == trade_id)
-                    .values(status='CLOSED', exit_price=exit_price, updated_at=func.now())
+                    .values(status='CLOSED', exit_price=exit_price)
                 )
                 await conn.execute(update_stmt)
                 
