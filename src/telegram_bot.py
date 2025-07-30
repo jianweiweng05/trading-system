@@ -1,8 +1,4 @@
 import logging
-import os
-import sys
-import asyncio
-import fcntl
 from functools import wraps
 from fastapi import FastAPI
 from telegram import Update, ReplyKeyboardMarkup
@@ -65,7 +61,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # 获取交易所时间
         try:
-            exchange_time = await exchange.fetch_time()
+            await exchange.fetch_time()
             exchange_status = "✅ 连接正常"
         except Exception as e:
             exchange_status = f"❌ 连接异常: {e}"
@@ -189,7 +185,7 @@ async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await SystemState.set_state("ACTIVE", application)
     await update.message.reply_text("🟢 系统已恢复交易")
 
-# --- 3. 异步的、独立的Bot启动与关闭逻辑 ---
+# --- 3. 异步的、独立的Bot启动与关闭逻辑 (已简化) ---
 async def state_change_alert(old_state: str, new_state: str, application: Application):
     """
     一个独立的回调函数，用于在状态变更时发送Telegram通知
@@ -204,11 +200,10 @@ async def state_change_alert(old_state: str, new_state: str, application: Applic
 
 async def start_bot(app_instance: FastAPI):
     """
-    在FastAPI的生命周期中，安全地启动Telegram Bot
+    在FastAPI的生命周期中，安全地启动Telegram Bot (已简化为最终版本)
     """
     logger.info("正在启动Telegram Bot...")
     
-    # 检查是否已创建Telegram应用实例
     if not hasattr(app_instance.state, 'telegram_app'):
         logger.error("无法启动Telegram Bot: telegram_app 未初始化")
         return
@@ -237,109 +232,25 @@ async def start_bot(app_instance: FastAPI):
     application.add_handler(MessageHandler(filters.Regex('^🔴 紧急暂停$'), halt_command))
     application.add_handler(MessageHandler(filters.Regex('^🟢 恢复运行$'), resume_command))
     
-    await application.initialize()
-    await application.start()
+    # 在后台以非阻塞方式运行轮询
+    # drop_pending_updates=True 会清除掉机器人离线期间积压的旧消息
+    application.job_queue.run_once(lambda _: application.run_polling(drop_pending_updates=True), 0)
     
-    # ===== Render 平台专用解决方案 =====
-    # 1. 文件锁机制 - 防止同一容器内多个实例
-    lock_file_path = "/tmp/bot_instance.lock"
-    try:
-        lock_file = open(lock_file_path, "w")
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        logger.info("已获取文件锁，继续启动")
-        app_instance.state.bot_lock = lock_file
-    except (BlockingIOError, IOError):
-        logger.critical("检测到另一个Bot实例正在运行（同一容器内）。为避免冲突，系统将退出。")
-        await application.stop()
-        sys.exit(1)
-    
-    # 2. 强制清理Webhook - 确保没有残留状态
-    try:
-        await application.bot.delete_webhook(drop_pending_updates=True)
-        logger.info("已强制删除任何可能存在的Webhook设置")
-    except Exception as e:
-        logger.warning(f"清理Webhook时出错: {e}")
-    
-    # 3. 带重试机制的轮询启动 - 处理Render新旧容器共存期
-    max_retries = 10  # 最多重试10次
-    retry_delay = 5   # 每次重试间隔5秒
-    
-    for attempt in range(1, max_retries + 1):
-        try:
-            logger.info(f"尝试启动轮询 (第 {attempt}/{max_retries} 次)...")
-            
-            # 使用优化的轮询参数
-            await application.updater.start_polling(
-                drop_pending_updates=True,
-                allowed_updates=["message", "callback_query"],
-                timeout=60,
-                poll_interval=0.5
-            )
-            
-            logger.info("Telegram Bot已成功启动轮询并获得控制权。")
-            return  # 成功启动，退出函数
-        
-        except telegram.error.Conflict as e:
-            logger.warning(
-                f"启动轮询时发生冲突 (尝试 {attempt}/{max_retries}): {str(e)}"
-                f"\n将在 {retry_delay} 秒后重试..."
-            )
-            
-            # 停止可能已部分初始化的updater
-            if application.updater and application.updater.running:
-                try:
-                    await application.updater.stop()
-                except:
-                    pass
-            
-            # 等待一段时间，给旧实例关闭的机会
-            await asyncio.sleep(retry_delay)
-            
-        except Exception as e:
-            logger.critical(f"启动轮询时发生无法恢复的错误: {e}")
-            await application.stop()
-            # 释放文件锁
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
-            lock_file.close()
-            sys.exit(1)
-    
-    # 所有重试均失败
-    logger.critical("⚠️ 所有启动轮询的尝试均因冲突而失败。请检查Render配置或手动停止所有实例。")
-    # 释放文件锁并退出
-    fcntl.flock(lock_file, fcntl.LOCK_UN)
-    lock_file.close()
-    await application.stop()
-    sys.exit(1)
+    logger.info("Telegram Bot 已被调度在后台运行轮询。")
 
 async def stop_bot(app_instance: FastAPI):
     """
-    在FastAPI的生命周期中，安全地关闭Telegram Bot
+    在FastAPI的生命周期中，安全地关闭Telegram Bot (已简化为最终版本)
     """
     logger.info("正在关闭Telegram Bot...")
     
-    # 释放文件锁
-    if hasattr(app_instance.state, 'bot_lock'):
-        try:
-            lock_file = app_instance.state.bot_lock
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
-            lock_file.close()
-            logger.info("已释放文件锁")
-        except Exception as e:
-            logger.error(f"释放文件锁失败: {e}")
-    
-    # 检查是否已创建Telegram应用实例
     if not hasattr(app_instance.state, 'telegram_app'):
         logger.warning("无法关闭Telegram Bot: telegram_app 未初始化")
         return
     
     application = app_instance.state.telegram_app
     
-    # 安全地停止轮询和关闭应用
-    try:
-        if application.updater and application.updater.running:
-            await application.updater.stop()
-        await application.stop()
-        await application.shutdown()
-        logger.info("Telegram Bot已成功关闭。")
-    except Exception as e:
-        logger.error(f"关闭Telegram Bot时出错: {e}", exc_info=True)
+    # updater.stop() 已经在 shutdown() 中被调用
+    await application.shutdown()
+    
+    logger.info("Telegram Bot已成功关闭。")
