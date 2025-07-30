@@ -3,10 +3,10 @@ import sys
 import time
 import hmac
 import hashlib
-import os  # 添加这行导入
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
-import ccxt.async_support as ccxt
+from ccxt.async_support import binance  # 修改后的导入方式
 from telegram.ext import ApplicationBuilder
 
 # --- 1. 安全导入 (只从我们自己的模块导入) ---
@@ -51,21 +51,27 @@ async def lifespan(app: FastAPI):
     应用启动时初始化所有核心对象并注入依赖，关闭时执行清理
     """
     # 启动
+    telegram_app = None  # 添加引用以便清理
+    exchange = None  # 添加引用以便清理
+    
     try:
         logger.info("系统正在启动...")
         
         # 1. 创建核心对象
-        app.state.exchange = ccxt.async_support.binance({
+        exchange = binance({
             'apiKey': CONFIG.binance_api_key, 'secret': CONFIG.binance_api_secret,
             'enableRateLimit': True, 'options': {'defaultType': 'future'}
         })
-        app.state.telegram_app = ApplicationBuilder().token(CONFIG.telegram_bot_token).build()
+        app.state.exchange = exchange
+        
+        telegram_app = ApplicationBuilder().token(CONFIG.telegram_bot_token).build()
+        app.state.telegram_app = telegram_app
 
         # 2. 将核心对象注入到Telegram Bot的 "公共背包"
-        app.state.telegram_app.bot_data["exchange"] = app.state.exchange
-        app.state.telegram_app.bot_data["config"] = CONFIG
-        app.state.telegram_app.bot_data["system_state"] = SystemState
-        app.state.telegram_app.bot_data["application"] = app.state.telegram_app
+        telegram_app.bot_data["exchange"] = exchange
+        telegram_app.bot_data["config"] = CONFIG
+        telegram_app.bot_data["system_state"] = SystemState
+        telegram_app.bot_data["application"] = telegram_app
 
         # 3. 初始化数据库
         await init_db()
@@ -74,7 +80,7 @@ async def lifespan(app: FastAPI):
         await start_bot(app)
 
         # 5. 设置初始状态
-        await SystemState.set_state("ACTIVE", app.state.telegram_app)
+        await SystemState.set_state("ACTIVE", telegram_app)
         
         logger.info("系统启动完成。")
         yield
@@ -84,8 +90,14 @@ async def lifespan(app: FastAPI):
     
     # 关闭
     logger.info("系统正在关闭...")
-    await stop_bot(app)
-    await app.state.exchange.close()
+    
+    # 安全地关闭Telegram Bot
+    if telegram_app:
+        await stop_bot(app)
+    
+    # 安全地关闭交易所连接
+    if exchange:
+        await exchange.close()
 
 # --- 4. 创建FastAPI应用实例 ---
 app = FastAPI(
@@ -141,5 +153,5 @@ async def tradingview_webhook(request: Request):
 # --- 6. 启动服务器 ---
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))  # 使用os模块获取端口
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)

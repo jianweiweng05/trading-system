@@ -1,6 +1,6 @@
 import logging
 from functools import wraps
-from fastapi import FastAPI  # 添加这行导入
+from fastapi import FastAPI
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes, Application, CommandHandler, MessageHandler, filters
 from telegram.constants import ParseMode
@@ -107,6 +107,11 @@ async def start_bot(app_instance: FastAPI):
     """
     logger.info("正在启动Telegram Bot...")
     
+    # 检查是否已创建Telegram应用实例
+    if not hasattr(app_instance.state, 'telegram_app'):
+        logger.error("无法启动Telegram Bot: telegram_app 未初始化")
+        return
+    
     application = app_instance.state.telegram_app
     
     SystemState.set_alert_callback(lambda old, new: state_change_alert(old, new, application))
@@ -133,9 +138,20 @@ async def stop_bot(app_instance: FastAPI):
     在FastAPI的生命周期中，安全地关闭Telegram Bot
     """
     logger.info("正在关闭Telegram Bot...")
+    
+    # 检查是否已创建Telegram应用实例
+    if not hasattr(app_instance.state, 'telegram_app'):
+        logger.warning("无法关闭Telegram Bot: telegram_app 未初始化")
+        return
+    
     application = app_instance.state.telegram_app
-    if application.updater and application.updater.running:
-        await application.updater.stop()
-    await application.stop()
-    await application.shutdown()
-    logger.info("Telegram Bot已成功关闭。")
+    
+    # 安全地停止轮询和关闭应用
+    try:
+        if application.updater and application.updater.running:
+            await application.updater.stop()
+        await application.stop()
+        await application.shutdown()
+        logger.info("Telegram Bot已成功关闭。")
+    except Exception as e:
+        logger.error(f"关闭Telegram Bot时出错: {e}", exc_info=True)
