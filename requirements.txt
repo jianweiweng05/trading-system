@@ -9,3 +9,5 @@ pandas==1.5.3
 pandas-ta==0.3.14b0
 python-dotenv==1.0.1
 sqlalchemy==1.4.46
+psutil==5.9.8
+
