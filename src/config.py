@@ -1,24 +1,36 @@
 import os
-from dotenv import load_dotenv
+import logging
 
-# 加载环境变量
-load_dotenv()
+# --- 1. 日志配置 ---
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("Config")
 
-# 获取当前文件所在目录
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# --- 2. 环境变量加载函数 ---
+def get_env(key: str, required: bool = True, default=None):
+    """安全地从环境中获取变量。"""
+    val = os.getenv(key, default)
+    if required and not val:
+        logger.error(f"FATAL: 缺失必需的环境变量: {key}")
+        raise RuntimeError(f"FATAL: Missing required environment var: {key}")
+    return val
 
-# 数据库配置
-DATABASE_PATH = os.path.join(BASE_DIR, "trading_system.db")
-DATABASE_URL = f"sqlite+aiosqlite:///{DATABASE_PATH}"
+# --- 3. 加载所有API密钥和秘密 ---
+API_KEY = get_env("BINANCE_API_KEY")
+API_SECRET = get_env("BINANCE_API_SECRET")
+TELEGRAM_TOKEN = get_env("TELEGRAM_BOT_TOKEN")
+ADMIN_CHAT_ID = get_env("CHAT_ID")
+TV_WEBHOOK_SECRET = get_env("TV_WEBHOOK_SECRET", required=False)
 
-# 其他配置
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
-TV_WEBHOOK_SECRET = os.getenv("TV_WEBHOOK_SECRET")
-BINANCE_API_KEY = os.getenv("BINANCE_API_KEY")
-BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET")
-BASE_LEVERAGE = int(os.getenv("BASE_LEVERAGE", "10"))
-INITIAL_SIM_BALANCE = float(os.getenv("INITIAL_SIM_BALANCE", "10000.0"))
-RUN_MODE = os.getenv("RUN_MODE", "simulate")
-DEBUG_MODE = os.getenv("DEBUG_MODE", "False") == "True"
-LOG_LEVEL = os.getenv("LOG_LEVEL", "DEBUG" if DEBUG_MODE else "INFO")
+# --- 4. 核心系统参数 ---
+DB_BASE_PATH = "/var/data/db" if "RENDER" in os.environ else "."
+DB_FILE = os.path.join(DB_BASE_PATH, "trading_system_v7.db")
+os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+
+RUN_MODE = get_env("RUN_MODE", default="live")
+BASE_LEVERAGE = int(get_env("BASE_LEVERAGE", default="3"))
+
+logger.info(f"配置加载成功. 模式: {RUN_MODE}, 杠杆: {BASE_LEVERAGE}x")
