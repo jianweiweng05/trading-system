@@ -114,7 +114,8 @@ async def start_bot(app_instance: FastAPI):
     
     application = app_instance.state.telegram_app
     
-    SystemState.set_alert_callback(lambda old, new: state_change_alert(old, new, application))
+    # 修复回调函数参数不匹配问题
+    SystemState.set_alert_callback(lambda old, new, app: state_change_alert(old, new, application))
     
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("status", status_command))
