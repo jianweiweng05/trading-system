@@ -1,11 +1,16 @@
+# render.yaml (为了匹配已有服务的版本)
+
 services:
   - type: web
-    name: trading-systemV7.0
+    name: trading-systemV-v7
+
     runtime: docker
     dockerfilePath: ./Dockerfile
+
     healthCheck:
       path: /health
       initialDelaySeconds: 120
+      
     envVars:
       - key: PORT
         value: 8000
