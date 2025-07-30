@@ -6,7 +6,7 @@ import hashlib
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
-from ccxt.async_support import binance  # 修改后的导入方式
+from ccxt.async_support import binance
 from telegram.ext import ApplicationBuilder
 
 # --- 1. 安全导入 (只从我们自己的模块导入) ---
@@ -51,8 +51,8 @@ async def lifespan(app: FastAPI):
     应用启动时初始化所有核心对象并注入依赖，关闭时执行清理
     """
     # 启动
-    telegram_app = None  # 添加引用以便清理
-    exchange = None  # 添加引用以便清理
+    telegram_app = None
+    exchange = None
     
     try:
         logger.info("系统正在启动...")
@@ -114,7 +114,6 @@ def root():
 
 @app.get("/health")
 async def health_check():
-    # 可以在这里增加数据库和交易所连接检查
     return {"status": "ok"}
 
 @app.post("/webhook")
@@ -142,7 +141,6 @@ async def tradingview_webhook(request: Request):
     try:
         signal_data = await request.json()
         logger.info(f"收到有效信号，准备分发给交易引擎: {signal_data}")
-        # result = await process_signal(signal_data, request.app.state.exchange)
         
         return {"status": "processed", "data": signal_data}
     
