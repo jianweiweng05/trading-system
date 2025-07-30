@@ -2,7 +2,7 @@ import logging
 import os
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import (
-    Table, Column, Integer, String, Float, DateTime, MetaData, insert, select, update, func, delete
+    Table, Column, Integer, String, Float, DateTime, MetaData, insert, select, update, func
 )
 
 # 导入全局配置
@@ -23,7 +23,6 @@ trades = Table(
     Column('symbol', String, nullable=False, index=True),
     Column('quantity', Float, nullable=False),
     Column('entry_price', Float, nullable=False),
-    Column('exit_price', Float),
     Column('trade_type', String, nullable=False),
     Column('status', String, nullable=False, default='OPEN', index=True),
     Column('strategy_id', String),
@@ -113,22 +112,3 @@ async def close_trade(trade_id: int, exit_price: float) -> bool:
         except Exception as e:
             logger.error(f"数据库平仓操作失败: {e}", exc_info=True)
             return False
-
-# --- 5. Bot 实例管理功能 ---
-async def delete_bot_marker():
-    """删除Bot运行标记"""
-    logger.info("正在尝试清理数据库中的Bot运行标记...")
-    try:
-        async with engine.connect() as conn:
-            stmt = delete(trades).where(
-                (trades.c.symbol == "BOT_INSTANCE") & 
-                (trades.c.status == "BOT_RUNNING")
-            )
-            result = await conn.execute(stmt)
-            await conn.commit()
-            if result.rowcount > 0:
-                logger.info(f"成功删除了 {result.rowcount} 个旧的Bot运行标记。")
-            else:
-                logger.info("数据库中没有需要清理的Bot运行标记。")
-    except Exception as e:
-        logger.error(f"清理数据库中的Bot运行标记时出错: {e}", exc_info=True)
