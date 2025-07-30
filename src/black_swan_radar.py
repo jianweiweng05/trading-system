@@ -1,3 +1,4 @@
+import os
 import asyncio
 import logging
 import json
@@ -6,19 +7,39 @@ import aiosqlite
 import feedparser
 import httpx
 
-# --- 1. 从我们自己的模块中导入所有“专家”和“工具” ---
+# 导入共享的组件
 from config import CONFIG
 from system_state import SystemState
 
 logger = logging.getLogger("BlackSwanRadar")
 
-# --- 2. 数据库功能 (独立于交易数据库) ---
+# --- 修复数据库路径问题 ---
+def get_db_paths():
+    """获取安全的数据库路径"""
+    # 在Render平台使用项目目录下的data文件夹
+    if "RENDER" in os.environ:
+        base_path = os.path.join(os.getcwd(), "data")
+        os.makedirs(base_path, exist_ok=True)
+        radar_db = os.path.join(base_path, "radar_log.db")
+        main_db = os.path.join(base_path, "trading_state_v5.db")
+    else:
+        radar_db = "radar_log.db"
+        main_db = "trading_state_v5.db"
+    
+    return radar_db, main_db
+
+RADAR_DB_FILE, MAIN_DB_FILE = get_db_paths()
+
+# --- 数据库功能 ---
 async def radar_db_query(query, params=(), commit=True):
-    async with aiosqlite.connect(CONFIG.radar_db_path) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(query, params)
-        if "SELECT" in query.upper(): return await cursor.fetchall()
-        if commit: await db.commit()
+    async with aiosqlite.connect(RADAR_DB_FILE) as db:
+        try:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(query, params)
+            if "SELECT" in query.upper(): return await cursor.fetchall()
+            if commit: await db.commit()
+        except Exception as e:
+            logger.error(f"Radar DB query failed on {RADAR_DB_FILE}: {e}", exc_info=True)
 
 async def init_radar_db():
     await radar_db_query("CREATE TABLE IF NOT EXISTS intelligence (id INTEGER PRIMARY KEY, timestamp TEXT, source TEXT, content TEXT, risk_level TEXT, summary TEXT, UNIQUE(content))")
@@ -34,7 +55,7 @@ async def has_been_processed(url):
 async def mark_as_processed(url):
     await radar_db_query("INSERT INTO processed_items (url, processed_at) VALUES (?, ?)", (url, datetime.utcnow().isoformat()))
 
-# --- 3. 信息抓取模块 ---
+# --- 信息抓取模块 ---
 async def fetch_rss_feeds():
     urls = ["https://www.coindesk.com/arc/outboundfeeds/rss/", "https://cointelegraph.com/rss"]
     headlines = []
@@ -51,7 +72,7 @@ async def fetch_rss_feeds():
                 logger.warning(f"无法抓取RSS源 {url}: {e}")
     return headlines
 
-# --- 4. AI分析模块 (V2.0 Prompt) ---
+# --- AI分析模块 (V2.0 Prompt) ---
 async def analyze_with_deepseek(headlines: list):
     if not headlines: return None
     intelligence_brief = "\n- ".join(headlines)
@@ -101,7 +122,7 @@ You MUST respond ONLY with a single, valid JSON object with these exact fields:
         logger.error(f"DeepSeek API调用失败: {e}")
         return None
 
-# --- 5. 主循环与熔断逻辑 ---
+# --- 主循环与熔断逻辑 ---
 class RadarController:
     def __init__(self):
         self.critical_event_timestamps = []
@@ -125,7 +146,7 @@ class RadarController:
 
                         # 二次验证熔断逻辑
                         now = datetime.utcnow()
-                        self.critical_event_timestamps = [t for t in self.critical_event_timestamps if now - t < timedelta(minutes=30)]
+                        self.critical_event_timestamps = [t for t in self.critical_event_timestamps if (now - t).total_seconds() < 1800]  # 30分钟
 
                         if analysis.get('level') == 'critical':
                             self.critical_event_timestamps.append(now)
