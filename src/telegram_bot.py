@@ -1,5 +1,6 @@
 import logging
 from functools import wraps
+from fastapi import FastAPI  # 添加这行导入
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes, Application, CommandHandler, MessageHandler, filters
 from telegram.constants import ParseMode
