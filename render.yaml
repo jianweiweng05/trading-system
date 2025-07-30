@@ -1,11 +1,18 @@
 services:
   - type: web
-    name: trading-system
-    env: python
-    python:
-      version: "3.10.13"
-    buildCommand: ./render-build.sh
-    startCommand: ./start.sh
+    name: trading-systemV7.0
+    runtime: python
+    plan: starter 
+    buildCommand: "./render-build.sh"
+    startCommand: "./start.sh"
+    healthCheck:
+      path: /health               
+      initialDelaySeconds: 120    
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.10.13" 
       - key: PORT
-        value: 10000
+        fromService:
+          type: web
+          name: trading-systemV7.0
+          property: port
