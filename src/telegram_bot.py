@@ -9,12 +9,11 @@ from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes, Application, CommandHandler, MessageHandler, filters
 from telegram.constants import ParseMode
 import telegram.error
-from sqlalchemy import delete
 
 # 导入共享的组件
 from config import CONFIG
 from system_state import SystemState
-from database import get_open_positions, engine, trades
+from database import get_open_positions
 
 logger = logging.getLogger(__name__)
 
@@ -241,44 +240,76 @@ async def start_bot(app_instance: FastAPI):
     await application.initialize()
     await application.start()
     
-    # ===== 实例控制方案 =====
-    # 使用文件锁确保单实例
+    # ===== Render 平台专用解决方案 =====
+    # 1. 文件锁机制 - 防止同一容器内多个实例
     lock_file_path = "/tmp/bot_instance.lock"
     try:
         lock_file = open(lock_file_path, "w")
-        
-        # 尝试获取文件锁 (非阻塞)
         fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
         logger.info("已获取文件锁，继续启动")
-        
-        # 存储锁文件引用以便稍后释放
         app_instance.state.bot_lock = lock_file
     except (BlockingIOError, IOError):
-        logger.critical("检测到另一个Bot实例正在运行。为避免冲突，系统将退出。")
+        logger.critical("检测到另一个Bot实例正在运行（同一容器内）。为避免冲突，系统将退出。")
         await application.stop()
         sys.exit(1)
     
-    # 启动轮询
-    polling_params = {
-        "drop_pending_updates": True,
-        "allowed_updates": ["message"],
-        "timeout": 60,  # 60秒长轮询
-        "poll_interval": 0.5
-    }
-    
+    # 2. 强制清理Webhook - 确保没有残留状态
     try:
-        logger.info("启动轮询...")
-        await application.updater.start_polling(**polling_params)
-        logger.info("Telegram Bot已成功启动轮询。")
-    except telegram.error.Conflict as e:
-        logger.critical(f"Telegram API冲突: {str(e)}")
-        logger.critical("请确保只有一个Bot实例运行。系统将退出。")
-        await application.stop()
-        sys.exit(1)
+        await application.bot.delete_webhook(drop_pending_updates=True)
+        logger.info("已强制删除任何可能存在的Webhook设置")
     except Exception as e:
-        logger.error(f"启动轮询时发生未知错误: {e}")
-        await application.stop()
-        sys.exit(1)
+        logger.warning(f"清理Webhook时出错: {e}")
+    
+    # 3. 带重试机制的轮询启动 - 处理Render新旧容器共存期
+    max_retries = 10  # 最多重试10次
+    retry_delay = 5   # 每次重试间隔5秒
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            logger.info(f"尝试启动轮询 (第 {attempt}/{max_retries} 次)...")
+            
+            # 使用优化的轮询参数
+            await application.updater.start_polling(
+                drop_pending_updates=True,
+                allowed_updates=["message", "callback_query"],
+                timeout=60,
+                poll_interval=0.5
+            )
+            
+            logger.info("Telegram Bot已成功启动轮询并获得控制权。")
+            return  # 成功启动，退出函数
+        
+        except telegram.error.Conflict as e:
+            logger.warning(
+                f"启动轮询时发生冲突 (尝试 {attempt}/{max_retries}): {str(e)}"
+                f"\n将在 {retry_delay} 秒后重试..."
+            )
+            
+            # 停止可能已部分初始化的updater
+            if application.updater and application.updater.running:
+                try:
+                    await application.updater.stop()
+                except:
+                    pass
+            
+            # 等待一段时间，给旧实例关闭的机会
+            await asyncio.sleep(retry_delay)
+            
+        except Exception as e:
+            logger.critical(f"启动轮询时发生无法恢复的错误: {e}")
+            await application.stop()
+            # 释放文件锁
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            lock_file.close()
+            sys.exit(1)
+    
+    # 所有重试均失败
+    logger.critical("⚠️ 所有启动轮询的尝试均因冲突而失败。请检查Render配置或手动停止所有实例。")
+    # 释放文件锁并退出
+    fcntl.flock(lock_file, fcntl.LOCK_UN)
+    lock_file.close()
+    await application.stop()
+    sys.exit(1)
 
 async def stop_bot(app_instance: FastAPI):
     """
