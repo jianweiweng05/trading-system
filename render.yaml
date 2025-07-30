@@ -1,18 +1,25 @@
 services:
   - type: web
-    name: trading-systemV7.0
+    name: trading-systemv7  # 确保这个名字和您在 Render 网站上看到的服务名一致
+
     runtime: python
-    plan: starter 
-    buildCommand: "./render-build.sh"
-    startCommand: "./start.sh"
+    plan: starter
+    
+    # 直接在这里定义构建和启动命令，不再使用外部脚本
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python src/main.py" # 假设 main.py 在 src 文件夹下
+    
+    # 关键的健康检查配置
     healthCheck:
-      path: /health               
-      initialDelaySeconds: 120    
+      path: /health
+      initialDelaySeconds: 120
+      
+    # 环境变量
     envVars:
       - key: PYTHON_VERSION
-        value: "3.10.13" 
+        value: "3.10.13"
       - key: PORT
         fromService:
           type: web
-          name: trading-systemV7.0
+          name: trading-systemv7 # 这里的 name 必须和上面的一致
           property: port
