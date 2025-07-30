@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: trading-systemV7.0
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheck:
+      path: /health
+      initialDelaySeconds: 120
+    envVars:
+      - key: PORT
+        value: 8000
