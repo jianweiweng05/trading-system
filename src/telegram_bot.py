@@ -1,15 +1,18 @@
 import logging
+import os
+import sys
+import asyncio
 from functools import wraps
 from fastapi import FastAPI
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ContextTypes, Application, CommandHandler, MessageHandler, filters
 from telegram.constants import ParseMode
-import ccxt
+import telegram.error
 
 # 导入共享的组件
 from config import CONFIG
 from system_state import SystemState
-from database import get_open_positions  # 导入持仓查询函数
+from database import get_open_positions
 
 logger = logging.getLogger(__name__)
 
@@ -235,9 +238,36 @@ async def start_bot(app_instance: FastAPI):
     
     await application.initialize()
     await application.start()
-    await application.updater.start_polling(drop_pending_updates=True)
     
-    logger.info("Telegram Bot已成功启动轮询。")
+    # ===== 关键修复：确保单实例运行 =====
+    lock_file = "/tmp/bot_instance.lock"  # Render 使用 /tmp 目录
+    
+    # 检查是否已有实例在运行
+    if os.path.exists(lock_file):
+        logger.critical("检测到另一个Bot实例正在运行。为避免冲突，系统将退出。")
+        await application.stop()
+        sys.exit(1)  # 强制退出
+    
+    # 创建锁文件
+    with open(lock_file, "w") as f:
+        f.write(str(os.getpid()))
+    
+    try:
+        # 启动轮询
+        await application.updater.start_polling(drop_pending_updates=True)
+        logger.info("Telegram Bot已成功启动轮询。")
+    except telegram.error.Conflict as e:
+        logger.critical(f"Telegram API冲突: {str(e)}")
+        logger.critical("请确保只有一个Bot实例运行。系统将退出。")
+        await application.stop()
+        sys.exit(1)
+    finally:
+        # 确保清理锁文件
+        if os.path.exists(lock_file):
+            try:
+                os.remove(lock_file)
+            except:
+                pass
 
 async def stop_bot(app_instance: FastAPI):
     """
