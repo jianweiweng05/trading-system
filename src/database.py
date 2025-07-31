@@ -90,3 +90,33 @@ async def set_setting(key: str, value: str):
             await conn.execute(stmt)
         
         await conn.commit()
+
+# 在 database.py 文件末尾添加以下函数
+
+async def get_open_positions():
+    """获取所有未平仓交易"""
+    async with engine.connect() as conn:
+        stmt = select(trades).where(trades.c.status == 'OPEN')
+        result = await conn.execute(stmt)
+        return result.fetchall()
+
+async def log_trade(symbol: str, quantity: float, entry_price: float, 
+                   trade_type: str, status: str = "OPEN", strategy_id: str = "default") -> int:
+    """记录新交易"""
+    async with engine.connect() as conn:
+        stmt = insert(trades).values(
+            symbol=symbol, quantity=quantity, entry_price=entry_price,
+            trade_type=trade_type.upper(), status=status.upper(), strategy_id=strategy_id
+        )
+        result = await conn.execute(stmt)
+        await conn.commit()
+        return result.inserted_primary_key[0]
+
+async def close_trade(trade_id: int, exit_price: float) -> bool:
+    """平仓指定交易"""
+    async with engine.connect() as conn:
+        update_stmt = update(trades).where(trades.c.id == trade_id).values(status='CLOSED', exit_price=exit_price)
+        result = await conn.execute(update_stmt)
+        await conn.commit()
+        return result.rowcount > 0
+
