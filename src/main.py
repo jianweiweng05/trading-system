@@ -1,6 +1,7 @@
-# 文件: src/main.py (最终修正版)
+# 文件: src/main.py (最终稳定版 - 已修正 AttributeError)
 
 import logging
+import sys
 import time
 import hmac
 import hashlib
@@ -10,8 +11,8 @@ from fastapi import FastAPI, Request, HTTPException
 from ccxt.async_support import binance
 from telegram.ext import ApplicationBuilder
 
-# --- 1. 模块导入 ---
-from config import CONFIG, init_config
+# --- 1. 安全导入 (只从我们自己的模块导入) ---
+from config import CONFIG, init_config # 确保导入了 init_config
 from database import init_db
 from system_state import SystemState
 from telegram_bot import start_bot, stop_bot
@@ -33,7 +34,8 @@ def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
 def rate_limit_check(client_ip: str) -> bool:
     """简单的内存速率限制 (60秒内最多20次)"""
     now = time.time()
-    REQUEST_LOG.setdefault(client_ip, [])
+    if client_ip not in REQUEST_LOG:
+        REQUEST_LOG[client_ip] = []
     
     REQUEST_LOG[client_ip] = [t for t in REQUEST_LOG[client_ip] if now - t < 60]
     
@@ -44,7 +46,7 @@ def rate_limit_check(client_ip: str) -> bool:
     REQUEST_LOG[client_ip].append(now)
     return True
 
-# --- 3. 生命周期管理 (Lifespan) - 最终版 ---
+# --- 3. 生命周期管理 (Lifespan) - 最终稳定版 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -56,7 +58,7 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("系统正在启动...")
         
-        # 步骤 1: 初始化配置 (必须是第一步！)
+        # 步骤 1: 初始化配置
         await init_config()
         
         # 步骤 2: 初始化数据库
@@ -92,10 +94,10 @@ async def lifespan(app: FastAPI):
         # import sys
         # sys.exit(1)
     
-    # --- 关闭 (已修正) ---
+    # --- 关闭 (已修正 AttributeError) ---
     logger.info("系统正在关闭...")
     
-    # 使用 hasattr 检查属性是否存在，这是更安全的方式
+    # 使用 hasattr 检查属性是否存在，这是更安全的方式，避免了 .get() 的错误
     if hasattr(app.state, 'telegram_app'):
         await stop_bot(app)
     
@@ -106,8 +108,9 @@ async def lifespan(app: FastAPI):
 # --- 4. 创建FastAPI应用实例 ---
 app = FastAPI(
     title="自适应共振交易系统",
-    version="7.2-Final-Configurable",
-    lifespan=lifespan
+    version="7.2-Final-Configurable", # 版本号保持您之前的设定
+    lifespan=lifespan,
+    debug=CONFIG.log_level == "DEBUG" if CONFIG else False # 安全访问
 )
 
 # --- 5. API 端点 (Endpoints) ---
@@ -124,6 +127,7 @@ async def tradingview_webhook(request: Request):
     """
     接收来自TradingView的Webhook信号 (安全加固版)
     """
+
     if not verify_signature(CONFIG.tv_webhook_secret, request.headers.get("X-Tv-Signature", ""), await request.body()):
         raise HTTPException(status_code=401, detail="签名验证失败")
     
@@ -149,4 +153,5 @@ async def tradingview_webhook(request: Request):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
+    # 使用字符串路径 "main:app" 以支持 uvicorn 的 reload 功能
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
