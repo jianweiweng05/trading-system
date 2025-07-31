@@ -85,4 +85,8 @@ async def set_setting(key: str, value: str):
         if result.scalar_one_or_none():
             update_stmt = update(settings).where(settings.c.key == key).values(value=str(value))
             await conn.execute(update_stmt)
-        else:
+        else:  # 第88行 - 修复后
+            stmt = insert(settings).values(key=key, value=str(value))
+            await conn.execute(stmt)
+        
+        await conn.commit()
