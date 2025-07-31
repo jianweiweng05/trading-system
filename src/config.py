@@ -7,10 +7,9 @@ from typing import Optional
 
 load_dotenv()
 
-# --- 模块级变量 ---
+# 模块级变量
 CONFIG: Optional['AppConfig'] = None
 
-# --- 配置模型 ---
 class StaticConfig(BaseSettings):
     admin_chat_id: str = Field(..., env="ADMIN_CHAT_ID")
     binance_api_key: str = Field(..., env="BINANCE_API_KEY")
@@ -32,14 +31,13 @@ class StrategyConfig:
     resonance_coefficient: float = 1.0
 
     async def load_from_db(self):
-        # 延迟导入避免循环依赖
         from database import get_setting
         try:
             self.run_mode = await get_setting('run_mode', self.run_mode)
             self.macro_coefficient = float(await get_setting('macro_coefficient', str(self.macro_coefficient)))
             self.resonance_coefficient = float(await get_setting('resonance_coefficient', str(self.resonance_coefficient)))
         except Exception as e:
-            logging.warning(f"数据库配置加载失败，使用默认值: {str(e)}")
+            logging.warning(f"数据库配置加载失败: {str(e)}，使用默认值")
 
 class AppConfig:
     def __init__(self, static_config: StaticConfig, strategy_config: StrategyConfig):
@@ -53,7 +51,6 @@ class AppConfig:
             return getattr(self._static, name)
         raise AttributeError(f"'AppConfig' object has no attribute '{name}'")
 
-# --- 初始化函数 ---
 async def init_config() -> AppConfig:
     global CONFIG
     if CONFIG:
@@ -70,13 +67,13 @@ async def init_config() -> AppConfig:
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
         
-        # 3. 创建策略配置实例
+        # 3. 创建策略配置
         strategy_config = StrategyConfig()
         
-        # 4. 创建AppConfig
+        # 4. 创建最终配置
         CONFIG = AppConfig(static_config, strategy_config)
         
-        # 5. 尝试加载数据库配置（不强制）
+        # 5. 尝试加载数据库配置
         try:
             await strategy_config.load_from_db()
         except Exception as e:
