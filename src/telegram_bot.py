@@ -1,4 +1,4 @@
-# 文件: src/telegram_bot.py (最终版)
+# 文件: src/telegram_bot.py (最终修正版)
 
 import logging
 import asyncio
@@ -11,7 +11,6 @@ from telegram.constants import ParseMode
 # 导入共享的组件
 from config import CONFIG
 from system_state import SystemState
-# 注意：我们现在需要从 database 导入 setting 函数
 from database import get_open_positions, get_setting, set_setting
 
 logger = logging.getLogger(__name__)
@@ -23,11 +22,17 @@ MAIN_KEYBOARD = [
 ]
 REPLY_MARKUP = ReplyKeyboardMarkup(MAIN_KEYBOARD, resize_keyboard=True)
 
-# --- 2. 装饰器 ---
+# --- 2. 装饰器 (已移动到命令处理器之前) ---
 def execute_safe(func):
     """安全装饰器，进行权限检查"""
     @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        # 确保 CONFIG 已经初始化
+        if not CONFIG:
+            logger.warning("配置尚未初始化，命令被推迟。")
+            await update.message.reply_text("系统正在启动，请稍后再试...")
+            return
+
         if str(update.effective_user.id) != CONFIG.admin_chat_id:
             await update.message.reply_text("❌ 权限不足。")
             return
@@ -38,7 +43,7 @@ def execute_safe(func):
             await update.message.reply_text(f"⚠️ 命令执行时发生内部错误，请检查日志。")
     return wrapper
 
-# --- 3. 命令处理器 (已升级) ---
+# --- 3. 命令处理器 ---
 @execute_safe
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🚀 **交易机器人指挥中心**\n请使用下方仪表盘操作。", reply_markup=REPLY_MARKUP, parse_mode='Markdown')
@@ -98,23 +103,21 @@ async def set_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"❌ **无效的参数名**: `{key}`", parse_mode='Markdown')
             return
 
-        # 根据 key 进行类型验证和转换
         new_value = None
         if key == 'run_mode':
             if value_str.lower() not in ['live', 'simulate']:
                 await update.message.reply_text(f"❌ **无效的值**: `run_mode` 必须是 `live` 或 `simulate`。", parse_mode='Markdown')
                 return
             new_value = value_str.lower()
-        else: # macro_coefficient, resonance_coefficient
+        else:
             try:
                 new_value = float(value_str)
             except ValueError:
                 await update.message.reply_text(f"❌ **无效的值**: `{key}` 必须是一个数字。", parse_mode='Markdown')
                 return
 
-        # 写入数据库并更新内存中的配置
         await set_setting(key, str(new_value))
-        setattr(CONFIG, key, new_value) # 直接更新 CONFIG 对象的属性
+        setattr(CONFIG, key, new_value)
         
         logger.info(f"✅ 系统设置已更新: {key} = {new_value}")
         await update.message.reply_text(f"✅ **设置已更新**\n`{key}` 已成功设置为 `{new_value}`。\n此设置**立即生效**。", parse_mode='Markdown')
@@ -136,26 +139,24 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📋 **最近操作日志**:\n此功能暂未实现。")
 
-# --- 4. Bot 启动与关闭逻辑 (最终稳定版) ---
+# --- 4. Bot 启动与关闭逻辑 ---
 async def start_bot(app_instance: FastAPI):
     """在FastAPI的生命周期中，安全地启动Telegram Bot"""
     logger.info("正在启动Telegram Bot...")
     application = app_instance.state.telegram_app
     
-    # 添加所有命令和消息处理器
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("status", status_command))
     application.add_handler(CommandHandler("positions", positions_command))
     application.add_handler(CommandHandler("logs", logs_command))
     application.add_handler(CommandHandler("settings", settings_command))
-    application.add_handler(CommandHandler("set", set_command)) # 新增 set 命令
+    application.add_handler(CommandHandler("set", set_command))
     
     application.add_handler(MessageHandler(filters.Regex('^📊 系统状态$'), status_command))
     application.add_handler(MessageHandler(filters.Regex('^📈 当前持仓$'), positions_command))
     application.add_handler(MessageHandler(filters.Regex('^📋 操作日志$'), logs_command))
     application.add_handler(MessageHandler(filters.Regex('^⚙️ 设置$'), settings_command))
     
-    # 修复了事件循环冲突的最终方案
     await application.initialize()
     await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
