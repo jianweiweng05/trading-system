@@ -3,11 +3,12 @@ services:
     name: trading-systemV-v7
     runtime: docker
     dockerfilePath: ./Dockerfile
-  
+    
+    # 新增的预启动命令
     preStartCommand: |
       mkdir -p /var/data
       chmod 777 /var/data
-      echo "数据库目录权限已设置"
+      echo "✅ 数据库目录权限已设置"
     
     healthCheck:
       path: /health
@@ -16,3 +17,5 @@ services:
     envVars:
       - key: PORT
         value: 8000
+      - key: RENDER
+        value: "true"  # 标记Render环境
