@@ -1,31 +1,37 @@
-# 文件: src/main.py (最终稳定版 - 已修正 AttributeError)
+# 文件: src/main.py (与config.py兼容的最终版)
 
 import logging
-import sys
+import asyncio
 import time
 import hmac
 import hashlib
-import os
+import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from ccxt.async_support import binance
 from telegram.ext import ApplicationBuilder
 
-# --- 1. 安全导入 (只从我们自己的模块导入) ---
-from config import CONFIG, init_config # 确保导入了 init_config
+# 导入自定义模块
+from config import CONFIG, init_config
 from database import init_db
 from system_state import SystemState
 from telegram_bot import start_bot, stop_bot
 
+# 配置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 logger = logging.getLogger(__name__)
 
-# --- 2. 全局状态与辅助函数 ---
+# --- 全局状态与辅助函数 ---
 REQUEST_LOG = {}
 
 def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
     """验证TradingView HMAC签名"""
     if not secret:
-        logger.warning("TV_WEBHOOK_SECRET未设置，跳过签名验证 (仅限测试)。")
+        logger.warning("TV_WEBHOOK_SECRET未设置，跳过签名验证 (仅限测试)")
         return True
     
     expected = hmac.new(secret.encode('utf-8'), payload, hashlib.sha256).hexdigest()
@@ -40,118 +46,160 @@ def rate_limit_check(client_ip: str) -> bool:
     REQUEST_LOG[client_ip] = [t for t in REQUEST_LOG[client_ip] if now - t < 60]
     
     if len(REQUEST_LOG[client_ip]) >= 20:
-        logger.warning(f"IP {client_ip} 请求频率过高。")
+        logger.warning(f"IP {client_ip} 请求频率过高")
         return False
     
     REQUEST_LOG[client_ip].append(now)
     return True
 
-# --- 3. 生命周期管理 (Lifespan) - 最终稳定版 ---
+async def run_safe_polling(telegram_app):
+    """安全运行轮询的包装器"""
+    try:
+        logger.info("启动Telegram轮询服务...")
+        await telegram_app.updater.start_polling(
+            drop_pending_updates=True,
+            timeout=10,
+            read_timeout=5
+        )
+        logger.info("Telegram轮询服务已启动")
+        
+        # 永久等待直到被取消
+        while True:
+            await asyncio.sleep(3600)
+            
+    except asyncio.CancelledError:
+        logger.info("正在停止轮询服务...")
+        await telegram_app.updater.stop()
+        logger.info("轮询服务已停止")
+        raise
+    except Exception as e:
+        logger.error(f"轮询异常: {str(e)}", exc_info=True)
+        raise
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    应用启动时按正确顺序初始化所有核心模块，关闭时优雅清理
-    """
-    # --- 启动 ---
+    """应用生命周期管理"""
     exchange = None
+    polling_task = None
     
     try:
-        logger.info("系统正在启动...")
+        logger.info("系统启动中...")
         
-        # 步骤 1: 初始化配置
+        # 初始化配置和数据库
         await init_config()
-        
-        # 步骤 2: 初始化数据库
         await init_db()
         
-        # 步骤 3: 创建核心对象
+        # 初始化交易所连接
         exchange = binance({
-            'apiKey': CONFIG.binance_api_key, 'secret': CONFIG.binance_api_secret,
-            'enableRateLimit': True, 'options': {'defaultType': 'future'}
+            'apiKey': CONFIG.binance_api_key,
+            'secret': CONFIG.binance_api_secret,
+            'enableRateLimit': True,
+            'options': {'defaultType': 'future'}
         })
         app.state.exchange = exchange
         
+        # 初始化Telegram Bot
         telegram_app = ApplicationBuilder().token(CONFIG.telegram_bot_token).build()
         app.state.telegram_app = telegram_app
-
-        # 步骤 4: 将核心对象注入到Telegram Bot的 "公共背包"
-        telegram_app.bot_data["exchange"] = exchange
-        telegram_app.bot_data["config"] = CONFIG
-        telegram_app.bot_data["system_state"] = SystemState
-        telegram_app.bot_data["application"] = telegram_app
+        telegram_app.bot_data.update({
+            "exchange": exchange,
+            "config": CONFIG,
+            "system_state": SystemState,
+            "application": telegram_app
+        })
         
-        # 步骤 5: 启动Telegram Bot
+        # 启动服务
         await start_bot(app)
-
-        # 步骤 6: 设置系统初始状态
+        polling_task = asyncio.create_task(run_safe_polling(telegram_app))
+        app.state.polling_task = polling_task
         await SystemState.set_state("ACTIVE", telegram_app)
         
-        logger.info("✅ 系统启动完成。")
+        logger.info("系统启动完成")
         yield
         
     except Exception as e:
-        logger.critical(f"❌ 系统启动失败: {str(e)}", exc_info=True)
-        # import sys
-        # sys.exit(1)
+        logger.critical(f"启动失败: {str(e)}", exc_info=True)
+        raise
     
-    # --- 关闭 (已修正 AttributeError) ---
-    logger.info("系统正在关闭...")
-    
-    # 使用 hasattr 检查属性是否存在，这是更安全的方式，避免了 .get() 的错误
-    if hasattr(app.state, 'telegram_app'):
-        await stop_bot(app)
-    
-    if exchange:
-        await exchange.close()
-    logger.info("系统已成功关闭。")
+    finally:
+        logger.info("系统关闭中...")
+        
+        # 安全关闭所有服务
+        if polling_task and not polling_task.done():
+            polling_task.cancel()
+            try:
+                await polling_task
+            except asyncio.CancelledError:
+                pass
+        
+        if hasattr(app.state, 'telegram_app'):
+            await stop_bot(app)
+        
+        if exchange:
+            await exchange.close()
+            
+        logger.info("系统已关闭")
 
-# --- 4. 创建FastAPI应用实例 ---
+# 创建FastAPI应用
 app = FastAPI(
-    title="自适应共振交易系统",
-    version="7.2-Final-Configurable", # 版本号保持您之前的设定
+    title="交易机器人系统",
+    version="1.0.0",
     lifespan=lifespan,
-    debug=CONFIG.log_level == "DEBUG" if CONFIG else False # 安全访问
+    debug=CONFIG.log_level == "DEBUG"  # 从CONFIG获取调试模式
 )
 
-# --- 5. API 端点 (Endpoints) ---
+# --- API端点 ---
 @app.get("/")
-def root():
-    return {"status": "running", "version": app.version, "mode": CONFIG.run_mode if CONFIG else "initializing"}
+async def root():
+    return {
+        "status": "running",
+        "version": app.version,
+        "mode": CONFIG.run_mode
+    }
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "bot_running": hasattr(app.state, 'polling_task') and not app.state.polling_task.done()
+    }
 
 @app.post("/webhook")
 async def tradingview_webhook(request: Request):
-    """
-    接收来自TradingView的Webhook信号 (安全加固版)
-    """
-
-    if not verify_signature(CONFIG.tv_webhook_secret, request.headers.get("X-Tv-Signature", ""), await request.body()):
-        raise HTTPException(status_code=401, detail="签名验证失败")
+    """处理交易信号"""
+    if not verify_signature(
+        CONFIG.tv_webhook_secret,
+        request.headers.get("X-Tv-Signature", ""),
+        await request.body()
+    ):
+        raise HTTPException(401, "签名验证失败")
     
     if not rate_limit_check(request.client.host):
-        raise HTTPException(status_code=429, detail="请求频率过高")
+        raise HTTPException(429, "请求频率过高")
     
     if not await SystemState.is_active():
-        current_state = await SystemState.get_state()
-        logger.warning(f"信号被拒绝，因为系统状态为: {current_state}")
-        raise HTTPException(status_code=503, detail=f"Trading is not active. Current state: {current_state}")
+        state = await SystemState.get_state()
+        raise HTTPException(503, f"系统未激活 (当前状态: {state})")
 
     try:
-        signal_data = await request.json()
-        logger.info(f"收到有效信号 (模式: {CONFIG.run_mode.upper()})，准备分发给交易引擎: {signal_data}")
-        
-        return {"status": "processed", "data": signal_data}
-    
+        data = await request.json()
+        logger.info(f"收到信号: {data}")
+        return {"status": "processed", "data": data}
     except Exception as e:
-        logger.error(f"信号处理失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=400, detail="信号格式错误或处理异常")
+        logger.error(f"处理失败: {str(e)}")
+        raise HTTPException(400, "信号处理错误")
 
-# --- 6. 启动服务器 ---
+# 启动服务器
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    # 使用字符串路径 "main:app" 以支持 uvicorn 的 reload 功能
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    
+    # 从CONFIG获取端口配置，如果没有则默认为8000
+    port = getattr(CONFIG, "port", 8000)
+    
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=CONFIG.log_level == "DEBUG",  # 调试模式下启用热重载
+        log_level="info"
+    )
