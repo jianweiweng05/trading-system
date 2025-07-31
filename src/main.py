@@ -1,227 +1,264 @@
-import logging
+import pytest
 import asyncio
-import sys
 import time
 import hmac
 import hashlib
-import os
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException
-from ccxt.async_support import binance
-from telegram.ext import ApplicationBuilder
+from unittest.mock import Mock, patch, AsyncMock
+from fastapi.testclient import TestClient
+from main import app, verify_signature, rate_limit_check, REQUEST_LOG
 
-from config import CONFIG, init_config
-from database import init_db
-from system_state import SystemState
-from telegram_bot import initialize_bot, stop_bot_services
+# 保持原有fixture不变
+@pytest.fixture(autouse=True)
+def reset_request_log():
+    """每次测试后重置全局请求日志"""
+    original = REQUEST_LOG.copy()
+    yield
+    REQUEST_LOG.clear()
+    REQUEST_LOG.update(original)
 
-logger = logging.getLogger(__name__)
+@pytest.fixture
+def client():
+    return TestClient(app)
 
-# 全局状态与辅助函数
-REQUEST_LOG = {}
+@pytest.fixture
+def mock_config():
+    with patch('main.CONFIG') as mock:
+        mock.binance_api_key = "test_key"
+        mock.binance_api_secret = "test_secret"
+        mock.telegram_bot_token = "test_token"
+        mock.tv_webhook_secret = "test_secret"
+        mock.run_mode = "TEST"
+        mock.drop_pending_updates = True
+        mock.polling_timeout = 10
+        mock.log_level = "INFO"
+        yield mock
 
-def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
-    if not secret:
-        logger.warning("TV_WEBHOOK_SECRET未设置，跳过签名验证")
-        return True
+@pytest.fixture
+def mock_exchange():
+    with patch('main.binance') as mock:
+        mock.return_value = AsyncMock()
+        mock.return_value.fetch_time = AsyncMock(return_value=int(time.time() * 1000))
+        yield mock
+
+@pytest.fixture
+def mock_database():
+    with patch('main.init_db') as mock, \
+         patch('main.engine') as mock_engine:
+        mock_engine.connect.return_value.__aenter__ = AsyncMock()
+        mock_engine.connect.return_value.__aexit__ = AsyncMock()
+        yield mock
+
+@pytest.fixture
+def mock_system_state():
+    with patch('main.SystemState') as mock:
+        mock.set_state = AsyncMock(return_value=None)
+        mock.is_active = AsyncMock(return_value=True)
+        mock.get_state = AsyncMock(return_value="ACTIVE")
+        yield mock
+
+@pytest.fixture
+def mock_telegram_bot():
+    with patch('main.ApplicationBuilder') as mock, \
+         patch('main.initialize_bot') as mock_init, \
+         patch('main.stop_bot_services') as mock_stop:
+        mock_app = Mock()
+        mock_app.updater = Mock()
+        mock_app.updater.start_polling = AsyncMock()
+        mock_app.updater.stop = AsyncMock()
+        mock.return_value.token.return_value.build.return_value = mock_app
+        yield mock_app
+
+# 参数化测试用例
+@pytest.mark.parametrize("secret, signature, payload, expected", [
+    ("test_secret", "valid", b"test_payload", False),  # 无效签名
+    ("test_secret", "", b"test_payload", False),       # 空签名
+    ("", "any_signature", b"test_payload", True),      # 无密钥配置
+])
+def test_verify_signature(secret, signature, payload, expected):
+    """参数化测试签名验证的各种情况"""
+    # 计算有效签名
+    if signature == "valid":
+        signature = hmac.new(secret.encode('utf-8'), payload, hashlib.sha256).hexdigest()
+        expected = True
     
-    expected = hmac.new(secret.encode('utf-8'), payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature, expected)
+    result = verify_signature(secret, signature, payload)
+    assert result == expected
 
-def rate_limit_check(client_ip: str) -> bool:
-    now = time.time()
-    if client_ip not in REQUEST_LOG:
-        REQUEST_LOG[client_ip] = []
+# 参数化频率限制测试
+@pytest.mark.parametrize("requests_count, should_limit", [
+    (1, False),   # 单次请求
+    (19, False),  # 低于阈值
+    (20, True),   # 达到阈值
+    (25, True),   # 超过阈值
+])
+def test_rate_limit_check(requests_count, should_limit):
+    """测试不同请求频率下的限流行为"""
+    client_ip = "test_ip"
     
-    REQUEST_LOG[client_ip] = [t for t in REQUEST_LOG[client_ip] if now - t < 60]
+    # 模拟请求
+    for i in range(requests_count):
+        # 确保时间戳不同
+        with patch('time.time', return_value=time.time() + i*0.01):
+            result = rate_limit_check(client_ip)
     
-    if len(REQUEST_LOG[client_ip]) >= 20:
-        logger.warning(f"IP {client_ip} 请求频率过高")
-        return False
+    # 验证最后一次请求结果
+    assert result == should_limit
     
-    REQUEST_LOG[client_ip].append(now)
-    return True
+    # 验证时间窗口过期
+    REQUEST_LOG[client_ip] = [time.time() - 61]  # 61秒前的请求
+    assert rate_limit_check(client_ip) == True
+    assert len(REQUEST_LOG[client_ip]) == 1
 
-# 安全轮询函数
-async def run_safe_polling(telegram_app):
-    try:
-        logger.info("启动Telegram轮询服务...")
-        drop_updates = True
-        timeout = 10
-        if CONFIG:
-            drop_updates = getattr(CONFIG, 'drop_pending_updates', True)
-            timeout = getattr(CONFIG, 'polling_timeout', 10)
+# 生命周期测试增强
+@pytest.mark.asyncio
+async def test_lifespan_success(mock_config, mock_exchange, mock_database, mock_system_state, mock_telegram_bot):
+    """测试正常生命周期流程"""
+    async with app.router.lifespan_context(app):
+        # 验证初始化
+        assert app.state.exchange is not None
+        assert app.state.telegram_app is not None
         
-        await telegram_app.updater.start_polling(
-            drop_pending_updates=drop_updates,
-            timeout=timeout
-        )
-        mode = getattr(CONFIG, 'run_mode', 'UNKNOWN') if CONFIG else 'UNKNOWN'
-        logger.info(f"✅ Telegram轮询运行中 (模式: {mode.upper()})")
+        # 验证轮询任务启动
+        assert hasattr(app.state, 'polling_task')
+        assert not app.state.polling_task.done()
         
-        # 永久等待直到被取消
-        while True:
-            await asyncio.sleep(3600)
-            
-    except asyncio.CancelledError:
-        logger.info("收到轮询停止指令...")
-        await telegram_app.updater.stop()
-        logger.info("✅ Telegram轮询已安全停止")
-        raise
-    except Exception as e:
-        logger.error(f"轮询任务异常: {str(e)}", exc_info=True)
-        raise
+        # 验证系统状态
+        assert await SystemState.is_active() == True
 
-# 生命周期管理
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    exchange = None
-    telegram_initialized = False
+@pytest.mark.asyncio
+async def test_lifespan_failure(mock_config, mock_exchange, mock_database, mock_system_state):
+    """测试启动失败时的清理流程"""
+    # 模拟启动阶段失败
+    with patch('main.init_config', side_effect=Exception("Test error")):
+        async with app.router.lifespan_context(app):
+            pass  # 生命周期应正常执行清理
     
-    try:
-        logger.info("系统启动中...")
-        
-        # 步骤1: 初始化配置
-        await init_config()
-        
-        # 步骤2: 初始化数据库
-        await init_db()
-        
-        # 步骤3: 创建交易所实例
-        exchange = binance({
-            'apiKey': CONFIG.binance_api_key,
-            'secret': CONFIG.binance_api_secret,
-            'enableRateLimit': True,
-            'options': {'defaultType': 'future'}
-        })
-        app.state.exchange = exchange
-        
-        # 步骤4: 创建Telegram实例
-        telegram_app = ApplicationBuilder().token(CONFIG.telegram_bot_token).build()
-        app.state.telegram_app = telegram_app
-        
-        # 步骤5: 初始化机器人
-        await initialize_bot(app)
-        telegram_initialized = True
-        
-        # 步骤6: 设置系统状态
-        await SystemState.set_state("ACTIVE", telegram_app)
-        
-        logger.info("✅ 系统核心启动完成")
-        yield
-        
-        # 阶段2: 启动轮询
-        polling_task = asyncio.create_task(run_safe_polling(telegram_app))
-        app.state.polling_task = polling_task
+    # 验证清理操作
+    if hasattr(app.state, 'exchange'):
+        assert app.state.exchange.close.called
+
+# 参数化端点测试
+@pytest.mark.parametrize("endpoint, method, expected_status", [
+    ("/", "GET", 200),
+    ("/health", "GET", 200),
+    ("/startup-check", "GET", 200),
+    ("/webhook", "POST", 401),  # 默认无签名
+    ("/nonexistent", "GET", 404),
+])
+def test_endpoint_availability(client, endpoint, method, expected_status):
+    """测试所有端点的基本可用性"""
+    if method == "GET":
+        response = client.get(endpoint)
+    else:
+        response = client.post(endpoint, json={})
+    assert response.status_code == expected_status
+
+# 增强Webhook测试
+@pytest.mark.parametrize("scenario", [
+    "valid",             # 有效请求
+    "invalid_signature", # 无效签名
+    "rate_limited",      # 频率限制
+    "system_inactive",   # 系统未激活
+    "no_config",         # 配置未加载
+    "invalid_json",      # 无效JSON
+])
+@pytest.mark.asyncio
+async def test_webhook_endpoint(client, mock_config, mock_system_state, scenario):
+    """参数化测试Webhook各种场景"""
+    headers = {"X-Tv-Signature": "test_signature"}
+    payload = {"test": "data"}
+    
+    # 设置场景条件
+    if scenario == "valid":
+        with patch('main.verify_signature', return_value=True), \
+             patch('main.rate_limit_check', return_value=True):
+            response = client.post("/webhook", json=payload, headers=headers)
+            assert response.status_code == 200
+    
+    elif scenario == "invalid_signature":
+        response = client.post("/webhook", json=payload, headers=headers)
+        assert response.status_code == 401
+    
+    elif scenario == "rate_limited":
+        with patch('main.verify_signature', return_value=True), \
+             patch('main.rate_limit_check', return_value=False):
+            response = client.post("/webhook", json=payload, headers=headers)
+            assert response.status_code == 429
+    
+    elif scenario == "system_inactive":
+        mock_system_state.is_active = AsyncMock(return_value=False)
+        response = client.post("/webhook", json=payload, headers=headers)
+        assert response.status_code == 503
+    
+    elif scenario == "no_config":
+        with patch('main.CONFIG', None):
+            response = client.post("/webhook", json=payload, headers=headers)
+            assert response.status_code == 503
+    
+    elif scenario == "invalid_json":
+        response = client.post("/webhook", content="invalid_json", headers=headers)
+        assert response.status_code == 400
+
+# 轮询任务测试增强
+@pytest.mark.asyncio
+async def test_run_safe_polling_normal(mock_telegram_bot, mock_config):
+    """测试轮询任务正常流程"""
+    polling_task = asyncio.create_task(run_safe_polling(mock_telegram_bot))
+    
+    # 等待任务启动
+    await asyncio.sleep(0.1)
+    assert mock_telegram_bot.updater.start_polling.called
+    
+    # 测试正常停止
+    polling_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
         await polling_task
-        
-    except asyncio.CancelledError:
-        logger.info("收到终止信号")
-    except Exception as e:
-        logger.critical(f"启动失败: {str(e)}", exc_info=True)
-    finally:
-        logger.info("系统关闭中...")
-        
-        # 1. 停止轮询任务
-        if hasattr(app.state, 'polling_task'):
-            app.state.polling_task.cancel()
-            try:
-                await app.state.polling_task
-            except asyncio.CancelledError:
-                logger.info("轮询任务已取消")
-            except Exception as e:
-                logger.error(f"停止轮询时出错: {str(e)}")
-        
-        # 2. 停止Telegram服务
-        if telegram_initialized:
-            try:
-                await stop_bot_services(app)
-            except Exception as e:
-                logger.error(f"停止Telegram服务时出错: {str(e)}")
-        
-        # 3. 关闭交易所连接
-        if exchange:
-            try:
-                await exchange.close()
-            except Exception as e:
-                logger.error(f"关闭交易所时出错: {str(e)}")
-        
-        logger.info("✅ 系统已安全关闭")
+    assert mock_telegram_bot.updater.stop.called
 
-# 创建FastAPI应用
-app = FastAPI(
-    title="自适应共振交易系统",
-    version="7.2-Final-Configurable",
-    lifespan=lifespan,
-    debug=getattr(CONFIG, 'log_level', "INFO") == "DEBUG" if CONFIG else False
-)
+@pytest.mark.asyncio
+async def test_run_safe_polling_error(mock_telegram_bot):
+    """测试轮询任务异常处理"""
+    mock_telegram_bot.updater.start_polling.side_effect = Exception("Test error")
+    with pytest.raises(Exception):
+        await run_safe_polling(mock_telegram_bot)
 
-# API端点
-@app.get("/")
-def root():
-    mode = getattr(CONFIG, 'run_mode', 'initializing') if CONFIG else 'initializing'
-    return {"status": "running", "version": app.version, "mode": mode}
-
-@app.get("/health")
-async def health_check():
-    return {"status": "ok"}
-
-@app.get("/startup-check")
-async def startup_check():
-    """新增的健康检查端点"""
-    checks = {
-        "config_loaded": bool(CONFIG),
-        "db_accessible": False,
-        "exchange_ready": False
-    }
+# 新增健康检查详细测试
+@pytest.mark.asyncio
+async def test_startup_check_failure_scenarios(client, mock_config):
+    """测试健康检查的失败场景"""
+    # 数据库连接失败
+    with patch('main.engine.connect', side_effect=Exception("DB error")):
+        response = client.get("/startup-check")
+        assert response.json()["checks"]["db_accessible"] is False
     
-    try:
-        # 数据库检查
-        from database import engine
-        async with engine.connect():
-            checks["db_accessible"] = True
-        
-        # 交易所检查
-        if hasattr(app.state, 'exchange'):
-            await app.state.exchange.fetch_time()
-            checks["exchange_ready"] = True
-            
-    except Exception as e:
-        logger.warning(f"健康检查失败: {str(e)}")
+    # 交易所连接失败
+    with patch('main.binance', side_effect=Exception("Exchange error")):
+        response = client.get("/startup-check")
+        assert response.json()["checks"]["exchange_ready"] is False
     
-    return {
-        "status": "ok" if all(checks.values()) else "degraded",
-        "checks": checks
-    }
+    # 配置加载失败
+    with patch('main.CONFIG', None):
+        response = client.get("/startup-check")
+        assert response.json()["checks"]["config_loaded"] is False
 
-@app.post("/webhook")
-async def tradingview_webhook(request: Request):
-    if not CONFIG:
-        raise HTTPException(status_code=503, detail="系统配置未初始化")
-    
-    signature = request.headers.get("X-Tv-Signature", "")
-    payload = await request.body()
-    if not verify_signature(CONFIG.tv_webhook_secret, signature, payload):
-        raise HTTPException(status_code=401, detail="签名验证失败")
-    
-    client_ip = request.client.host if request.client else "unknown"
-    if not rate_limit_check(client_ip):
-        raise HTTPException(status_code=429, detail="请求频率过高")
-    
-    if not await SystemState.is_active():
-        current_state = await SystemState.get_state()
-        logger.warning(f"信号被拒绝，系统状态: {current_state}")
-        raise HTTPException(status_code=503, detail=f"交易未激活，当前状态: {current_state}")
+# 新增性能测试
+@pytest.mark.benchmark
+def test_rate_limit_performance(benchmark):
+    """性能测试：验证频率检查函数的效率"""
+    benchmark(rate_limit_check, "perf_test_ip")
 
-    try:
-        signal_data = await request.json()
-        logger.info(f"收到信号 (模式: {CONFIG.run_mode.upper()}): {signal_data}")
-        return {"status": "processed", "data": signal_data}
-    except Exception as e:
-        logger.error(f"信号处理失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=400, detail="信号格式错误")
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+# 新增并发测试
+@pytest.mark.asyncio
+async def test_concurrent_rate_limit():
+    """并发测试：验证频率检查在并发场景下的行为"""
+    client_ip = "concurrent_ip"
+    async def make_request():
+        rate_limit_check(client_ip)
+    
+    # 并发执行25次请求
+    tasks = [asyncio.create_task(make_request()) for _ in range(25)]
+    await asyncio.gather(*tasks)
+    
+    # 验证限流结果
+    assert len(REQUEST_LOG[client_ip]) == 20
+    assert rate_limit_check(client_ip) == False
