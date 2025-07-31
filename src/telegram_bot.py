@@ -10,7 +10,7 @@ from telegram.constants import ParseMode
 # 严格使用CONFIG作为唯一配置源
 from config import CONFIG
 from system_state import SystemState
-from database import get_open_positions, get_setting, set_setting
+from database import get_setting, set_setting, get_open_positions
 
 logger = logging.getLogger(__name__)
 
