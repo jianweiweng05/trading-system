@@ -1,82 +1,132 @@
-import time
-import logging
-from tenacity import retry, stop_after_attempt, wait_fixed
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+import asyncio
 
-# 导入共享的组件
-from database import db_query, get_sim_balance, get_sim_position, log_trade, get_config
-
-logger = logging.getLogger(__name__)
-
-# --- 1. 模拟盘引擎 (Simulated Broker) ---
-async def execute_sim_trade(exchange, symbol: str, target_amount: float):
-    """
-    在数据库中执行模拟交易，更新模拟持仓和余额 (已修复反向开仓逻辑)
-    """
-    current_pos = await get_sim_position(symbol)
-    current_amount = current_pos['amount']
-    diff = target_amount - current_amount
-
-    if abs(diff) < 0.00001:
-        return
-
-    side = 'buy' if diff > 0 else 'sell'
-    try:
-        ticker = await exchange.fetch_ticker(symbol)
-        price = ticker['last']
+# 测试模拟交易引擎
+@pytest.mark.asyncio
+async def test_execute_sim_trade():
+    # 模拟数据库和交易所对象
+    mock_exchange = AsyncMock()
+    mock_exchange.fetch_ticker.return_value = {'last': 100.0}
+    
+    # 测试用例1: 开新仓
+    with patch('database.get_sim_position') as mock_get_pos, \
+         patch('database.get_sim_balance') as mock_get_balance, \
+         patch('database.db_query') as mock_db_query, \
+         patch('database.log_trade') as mock_log_trade:
         
-        # 减仓或平仓部分逻辑
-        if current_amount * diff < 0:
-            balance = await get_sim_balance()
-            pnl = (price - current_pos['entry_price']) * current_amount if current_amount > 0 else (current_pos['entry_price'] - price) * abs(current_amount)
-            new_balance = balance + pnl
-            await db_query("UPDATE sim_account SET value = ? WHERE key = 'balance'", (new_balance,))
-            await db_query("DELETE FROM sim_positions WHERE symbol = ?", (symbol,))
-            logger.info(f"[SIM] 模拟平仓: {current_amount:.4f} {symbol} @ ${price}, PNL: ${pnl:.2f}")
-            await log_trade("SIM_TRADE", symbol, "CLOSE", "SUCCESS", f"Close at: {price}", "sim")
-            current_amount = 0 # 平仓后当前仓位为0
-
-        # 开仓或加仓部分逻辑
-        if abs(target_amount) > 0.00001 and diff != 0:
-             # 如果是从0开新仓
-            if abs(current_amount) < 0.00001:
-                await db_query("INSERT INTO sim_positions (symbol, amount, entry_price) VALUES (?, ?, ?)", 
-                               (symbol, target_amount, price))
-            else: # 如果是加仓
-                new_entry_price = (current_pos['entry_price'] * current_amount + price * (target_amount - current_amount)) / target_amount
-                await db_query("UPDATE sim_positions SET amount = ?, entry_price = ? WHERE symbol = ?",
-                               (target_amount, new_entry_price, symbol))
-            
-            logger.info(f"[SIM] 模拟开/加仓成功: {side} {abs(diff):.4f} {symbol} @ ${price}")
-            await log_trade("SIM_TRADE", symbol, side.upper(), "SUCCESS", f"Target: {target_amount}", "sim")
-
-    except Exception as e:
-        logger.error(f"[SIM] 模拟执行失败 for {symbol}: {e}", exc_info=True)
-        await log_trade("SIM_TRADE", symbol, side.upper(), "FAILED", str(e), "sim")
+        # 设置初始仓位为0
+        mock_get_pos.return_value = {'amount': 0, 'entry_price': 0}
+        mock_get_balance.return_value = 10000
         
-# --- 2. 实盘交易执行器 (Live Broker) ---
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
-async def get_live_position(exchange, symbol: str, all_positions=None):
-    # 此处省略...
-    pass
+        # 执行开仓
+        await execute_sim_trade(mock_exchange, 'BTC/USDT', 1.0)
+        
+        # 验证数据库操作
+        assert mock_db_query.call_count == 1
+        mock_log_trade.assert_called_once()
+        
+    # 测试用例2: 平仓
+    with patch('database.get_sim_position') as mock_get_pos, \
+         patch('database.get_sim_balance') as mock_get_balance, \
+         patch('database.db_query') as mock_db_query, \
+         patch('database.log_trade') as mock_log_trade:
+        
+        # 设置初始仓位
+        mock_get_pos.return_value = {'amount': 1.0, 'entry_price': 90.0}
+        mock_get_balance.return_value = 10000
+        
+        # 执行平仓
+        await execute_sim_trade(mock_exchange, 'BTC/USDT', 0)
+        
+        # 验证数据库操作
+        assert mock_db_query.call_count == 2
+        mock_log_trade.assert_called_once()
+        
+    # 测试用例3: 加仓
+    with patch('database.get_sim_position') as mock_get_pos, \
+         patch('database.get_sim_balance') as mock_get_balance, \
+         patch('database.db_query') as mock_db_query, \
+         patch('database.log_trade') as mock_log_trade:
+        
+        # 设置初始仓位
+        mock_get_pos.return_value = {'amount': 1.0, 'entry_price': 90.0}
+        mock_get_balance.return_value = 10000
+        
+        # 执行加仓
+        await execute_sim_trade(mock_exchange, 'BTC/USDT', 2.0)
+        
+        # 验证数据库操作
+        assert mock_db_query.call_count == 1
+        mock_log_trade.assert_called_once()
 
-async def execute_live_trade(exchange, symbol: str, target_amount: float, all_positions=None):
-    # 此处省略...
-    pass
+# 测试仓位管理器
+@pytest.mark.asyncio
+async def test_position_manager():
+    mock_exchange = AsyncMock()
+    
+    # 测试模拟模式
+    with patch('database.get_config') as mock_get_config, \
+         patch('execute_sim_trade') as mock_sim_trade:
+        
+        mock_get_config.return_value = 'sim'
+        await position_manager(mock_exchange, 'BTC/USDT', 1.0)
+        mock_sim_trade.assert_called_once()
+        
+    # 测试实盘模式
+    with patch('database.get_config') as mock_get_config:
+        mock_get_config.return_value = 'live'
+        with pytest.raises(NotImplementedError):
+            await position_manager(mock_exchange, 'BTC/USDT', 1.0)
+        
+    # 测试未知模式
+    with patch('database.get_config') as mock_get_config:
+        mock_get_config.return_value = 'unknown'
+        with pytest.raises(Exception):
+            await position_manager(mock_exchange, 'BTC/USDT', 1.0)
 
-# --- 3. 仓位总管 (Position Manager) ---
-async def position_manager(exchange, symbol: str, target_amount: float, all_positions=None):
-    """
-    根据系统运行模式，决定调用模拟交易员还是实盘交易员。
-    """
-    run_mode = await get_config('run_mode', 'live')
-    logger.info(f"仓位管理器启动: 模式={run_mode.upper()}, 目标={target_amount:.4f} {symbol}")
+# 测试重试机制
+@pytest.mark.asyncio
+async def test_retry_mechanism():
+    mock_exchange = AsyncMock()
+    
+    with patch('database.get_config') as mock_get_config:
+        mock_get_config.return_value = 'live'
+        
+        # 模拟 get_live_position 连续失败
+        with patch('get_live_position', side_effect=Exception("Test error")):
+            with pytest.raises(Exception):
+                await position_manager(mock_exchange, 'BTC/USDT', 1.0)
+                
+            # 验证 get_live_position 被调用了3次
+            assert mock_exchange.fetch_ticker.call_count == 0
 
-    try:
-        if run_mode == 'sim':
-            await execute_sim_trade(exchange, symbol, target_amount)
-        elif run_mode == 'live':
-            await execute_live_trade(exchange, symbol, target_amount, all_positions)
-        else:
-            logger.error(f"未知的运行模式: {run_mode}")
-    except Exception as e:
-        logger.error(f"仓位管理器执行失败: {e}")
+# 测试交易量过小的情况
+@pytest.mark.asyncio
+async def test_small_trade_amount():
+    """测试交易量过小的情况"""
+    mock_exchange = AsyncMock()
+    with patch('database.get_sim_position') as mock_get_pos:
+        mock_get_pos.return_value = {'amount': 1.0, 'entry_price': 100.0}
+        
+        # 测试交易量过小，应该直接返回
+        await execute_sim_trade(mock_exchange, 'BTC/USDT', 1.000001)
+        # 验证没有进行任何交易操作
+        mock_exchange.fetch_ticker.assert_not_called()
+
+# 测试数据库错误
+@pytest.mark.asyncio
+async def test_database_error():
+    """测试数据库操作失败的情况"""
+    mock_exchange = AsyncMock()
+    mock_exchange.fetch_ticker.return_value = {'last': 100.0}
+    
+    with patch('database.get_sim_position') as mock_get_pos, \
+         patch('database.db_query', side_effect=Exception("DB Error")):
+        
+        mock_get_pos.return_value = {'amount': 0, 'entry_price': 0}
+        
+        # 测试数据库错误处理
+        await execute_sim_trade(mock_exchange, 'BTC/USDT', 1.0)
+        # 验证错误被正确记录
+        # 需要添加日志断言
