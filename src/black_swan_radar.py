@@ -61,15 +61,19 @@ async def fetch_rss_feeds():
     headlines = []
     async with httpx.AsyncClient(timeout=15.0) as client:
         for url in urls:
-            try:
-                response = await client.get(url)
-                feed = feedparser.parse(response.text)
-                for entry in feed.entries[:5]:
-                    if entry.link and not await has_been_processed(entry.link):
-                        headlines.append(entry.title)
-                        await mark_as_processed(entry.link)
-            except Exception as e:
-                logger.warning(f"无法抓取RSS源 {url}: {e}")
+            for attempt in range(3):  # 添加重试机制
+                try:
+                    response = await client.get(url)
+                    feed = feedparser.parse(response.text)
+                    for entry in feed.entries[:5]:
+                        if entry.link and not await has_been_processed(entry.link):
+                            headlines.append(entry.title)
+                            await mark_as_processed(entry.link)
+                    break
+                except Exception as e:
+                    if attempt == 2:  # 最后一次尝试
+                        logger.warning(f"无法抓取RSS源 {url}: {e}")
+                    await asyncio.sleep(2 ** attempt)  # 指数退避
     return headlines
 
 # --- AI分析模块 (V2.0 Prompt) ---
@@ -126,6 +130,17 @@ You MUST respond ONLY with a single, valid JSON object with these exact fields:
 class RadarController:
     def __init__(self):
         self.critical_event_timestamps = []
+        self.error_count = 0
+        self.last_error_time = None
+
+    async def log_error(self, error):
+        """记录错误并检查是否需要告警"""
+        self.error_count += 1
+        self.last_error_time = datetime.utcnow()
+        
+        if self.error_count >= 5:  # 5次错误触发告警
+            logger.critical("雷达系统异常，需要人工干预")
+            await SystemState.set_state("ERROR")
 
     async def run(self):
         await init_radar_db()
@@ -160,6 +175,7 @@ class RadarController:
                     logger.info("无新情报，一切正常。")
 
             except Exception as e:
+                await self.log_error(e)
                 logger.error(f"雷达主循环发生错误: {e}", exc_info=True)
 
             await asyncio.sleep(900) # 15分钟
