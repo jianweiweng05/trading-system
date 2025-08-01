@@ -18,8 +18,8 @@ class StaticConfig(BaseSettings):
     log_level: str = Field("INFO", env="LOG_LEVEL")
     
     # Discord配置
-    discord_token: str = Field(..., env="DISCORD_TOKEN")
-    discord_channel_id: str = Field(..., env="DISCORD_CHANNEL_ID")
+    discord_token: str = Field(env="DISCORD_TOKEN")
+    discord_channel_id: str = Field(env="DISCORD_CHANNEL_ID") 
     discord_prefix: str = Field(default="!")
     
     class Config:
