@@ -91,6 +91,7 @@ async def lifespan(app: FastAPI):
         
         # 4. 初始化Telegram
         telegram_app = ApplicationBuilder().token(config.telegram_bot_token).build()
+        telegram_app.bot_data['config'] = config  # 将配置存入 bot_data
         app.state.telegram_app = telegram_app
         logger.info("✅ Telegram 应用已创建")
         
