@@ -7,14 +7,19 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from ccxt.async_support import binance
-from telegram.ext import ApplicationBuilder
+import discord
+from discord.ext import commands
 
 from config import CONFIG, init_config
 from database import init_db
 from system_state import SystemState
-from telegram_bot import initialize_bot, stop_bot_services
 
 logger = logging.getLogger(__name__)
+
+# 初始化Discord Bot
+intents = discord.Intents.default()
+intents.message_content = True
+discord_bot = commands.Bot(command_prefix="!", intents=intents)
 
 # 请求频率限制记录
 REQUEST_LOG = {}
@@ -33,40 +38,19 @@ def rate_limit_check(client_ip: str) -> bool:
     if client_ip not in REQUEST_LOG:
         REQUEST_LOG[client_ip] = []
     
-    # 清理1分钟前的记录
     REQUEST_LOG[client_ip] = [t for t in REQUEST_LOG[client_ip] if now - t < 60]
     
-    if len(REQUEST_LOG[client_ip]) >= 20:  # 每分钟最多20次请求
+    if len(REQUEST_LOG[client_ip]) >= 20:
         logger.warning(f"IP {client_ip} 请求过于频繁")
         return False
     
     REQUEST_LOG[client_ip].append(now)
     return True
 
-async def run_safe_polling(telegram_app):
-    """安全运行Telegram轮询任务"""
-    try:
-        logger.info("启动Telegram轮询...")
-        await telegram_app.bot.delete_webhook(drop_pending_updates=True)
-        await telegram_app.initialize()
-        await telegram_app.start()
-        
-        while telegram_app.running:
-            await asyncio.sleep(0.3)
-            
-    except Exception as e:
-        logger.warning(f"轮询异常: {e}")
-        if "running" not in str(e).lower():
-            raise
-    finally:
-        await telegram_app.stop()
-        await telegram_app.shutdown()
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI生命周期管理"""
     exchange = None
-    polling_task = None
     
     try:
         logger.info("🔄 系统启动中...")
@@ -91,49 +75,26 @@ async def lifespan(app: FastAPI):
         app.state.exchange = exchange
         logger.info("✅ 交易所连接已建立")
         
-        # 4. 初始化Telegram Bot
-        telegram_app = ApplicationBuilder().token(config.telegram_bot_token).build()
-        telegram_app.bot_data.update({
+        # 4. 启动Discord Bot
+        discord_bot.bot_data = {
             'config': config,
-            'exchange': exchange
-        })
-        app.state.telegram_app = telegram_app
-        logger.info("✅ Telegram应用初始化完成")
+            'exchange': exchange,
+            'app': app
+        }
+        asyncio.create_task(discord_bot.start(config.discord_token))
+        logger.info("✅ Discord Bot已启动")
         
-        # 5. 注册处理器
-        await initialize_bot(app)
-        logger.info("✅ Telegram处理器注册完成")
-        
-        # 6. 启动轮询任务
-        polling_task = asyncio.create_task(run_safe_polling(telegram_app))
-        app.state.polling_task = polling_task
-        await asyncio.sleep(1)  # 确保任务启动
-        logger.info("✅ 轮询任务已启动")
-        
-        # 7. 设置系统状态
-        await SystemState.set_state("ACTIVE", telegram_app)
+        # 5. 设置系统状态
+        await SystemState.set_state("ACTIVE", discord_bot)
         logger.info("🚀 系统启动完成 (状态: ACTIVE)")
         
-        yield  # FastAPI服务正式运行
+        yield
         
     except Exception as e:
         logger.critical(f"启动失败: {e}", exc_info=True)
         raise
     finally:
         logger.info("🛑 系统关闭中...")
-        
-        # 逆向关闭流程
-        if polling_task and not polling_task.done():
-            polling_task.cancel()
-            try:
-                await polling_task
-            except asyncio.CancelledError:
-                logger.info("轮询任务已取消")
-            except Exception as e:
-                logger.error(f"停止轮询出错: {e}")
-        
-        if hasattr(app.state, 'telegram_app'):
-            await stop_bot_services(app)
         
         if exchange:
             try:
@@ -142,7 +103,25 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"关闭交易所失败: {e}")
         
+        if discord_bot.is_ready():
+            await discord_bot.close()
+            logger.info("✅ Discord Bot已关闭")
+        
         logger.info("✅ 系统安全关闭")
+
+# Discord命令
+@discord_bot.command()
+async def status(ctx):
+    """查看系统状态"""
+    stats = {
+        "status": "ACTIVE",
+        "mode": ctx.bot.bot_data['config'].run_mode,
+        "exchange": "Connected" if ctx.bot.bot_data.get('exchange') else "Disconnected"
+    }
+    embed = discord.Embed(title="📊 系统状态", color=0x00ff00)
+    embed.add_field(name="运行模式", value=stats['mode'].upper())
+    embed.add_field(name="交易所", value=stats['exchange'])
+    await ctx.send(embed=embed)
 
 # FastAPI应用
 app = FastAPI(
@@ -154,7 +133,6 @@ app = FastAPI(
 
 @app.get("/")
 async def root():
-    """根端点"""
     return {
         "status": "running",
         "version": app.version,
@@ -163,40 +141,31 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """健康检查端点"""
     return {"status": "ok"}
 
 @app.get("/startup-check")
 async def startup_check():
-    """深度健康检查"""
     checks = {
-        "config_loaded": hasattr(CONFIG, 'telegram_bot_token'),
+        "config_loaded": hasattr(CONFIG, 'discord_token'),
         "db_accessible": False,
         "exchange_ready": False,
-        "telegram_initialized": hasattr(app.state, 'telegram_app'),
-        "telegram_running": False
+        "discord_ready": discord_bot.is_ready() if discord_bot else False
     }
     
     try:
-        # 数据库检查
         from database import engine
         async with engine.connect():
             checks["db_accessible"] = True
         
-        # 交易所检查
         if hasattr(app.state, 'exchange'):
             try:
                 await app.state.exchange.fetch_time()
                 checks["exchange_ready"] = True
-            except:
-                pass
-            
-        # Telegram检查
-        if checks["telegram_initialized"]:
-            checks["telegram_running"] = not app.state.telegram_app._running.is_set()
-            
+            except Exception as e:
+                logger.debug(f"交易所连接检查失败: {e}")
+                
     except Exception as e:
-        logger.error(f"健康检查失败: {e}")
+        logger.warning(f"健康检查失败: {e}")
     
     return {
         "status": "ok" if all(checks.values()) else "degraded",
@@ -205,22 +174,18 @@ async def startup_check():
 
 @app.post("/webhook")
 async def tradingview_webhook(request: Request):
-    """交易信号Webhook"""
     if not hasattr(CONFIG, 'tv_webhook_secret'):
         raise HTTPException(503, detail="系统未初始化")
     
-    # 签名验证
     signature = request.headers.get("X-Tv-Signature", "")
     payload = await request.body()
     if not verify_signature(CONFIG.tv_webhook_secret, signature, payload):
         raise HTTPException(401, detail="签名验证失败")
     
-    # 频率限制
     client_ip = request.client.host if request.client else "unknown"
     if not rate_limit_check(client_ip):
         raise HTTPException(429, detail="请求过于频繁")
     
-    # 系统状态检查
     if not await SystemState.is_active():
         current_state = await SystemState.get_state()
         raise HTTPException(503, detail=f"系统未激活 ({current_state})")
@@ -228,9 +193,15 @@ async def tradingview_webhook(request: Request):
     try:
         signal_data = await request.json()
         logger.info(f"收到交易信号: {signal_data}")
+        
+        # 通过Discord发送通知
+        if discord_bot.is_ready():
+            channel = discord_bot.get_channel(int(CONFIG.discord_channel_id))
+            await channel.send(f"📢 收到交易信号: {signal_data['symbol']}")
+            
         return {"status": "processed"}
     except Exception as e:
-        logger.error(f"信号处理失败: {e}")
+        logger.warning(f"信号处理失败: {e}")
         raise HTTPException(400, detail="无效的JSON数据")
 
 if __name__ == "__main__":
