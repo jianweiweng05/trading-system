@@ -7,8 +7,8 @@ from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, Mes
 from telegram.error import TelegramError
 
 from config import CONFIG
-# 删除这行: from utils.decorators import execute_safe
-from database import get_system_stats
+# 删除这行: from database import get_system_stats
+from database import engine  # 只导入需要的engine
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +21,44 @@ def execute_safe(func):
             logger.error(f"Error in {func.__name__}: {e}")
             return None
     return wrapper
+
+# 添加获取系统状态的函数
+async def get_system_stats():
+    """获取系统统计信息"""
+    try:
+        async with engine.connect() as conn:
+            # 这里可以根据需要添加实际的数据库查询
+            return {
+                "status": "active",
+                "uptime": str(datetime.now()),
+                "database": "connected"
+            }
+    except Exception as e:
+        logger.error(f"获取系统状态失败: {e}")
+        return {"status": "error", "error": str(e)}
+
+# 添加格式化函数
+async def format_system_status(stats: dict) -> str:
+    """格式化系统状态"""
+    return f"""
+📊 系统状态
+状态: {stats.get('status', 'unknown')}
+运行时间: {stats.get('uptime', 'unknown')}
+数据库: {stats.get('database', 'unknown')}
+"""
+
+# 添加持仓格式化函数
+async def format_position_info(positions: list) -> str:
+    """格式化持仓信息"""
+    if not positions:
+        return "📊 当前无持仓"
+    
+    result = "📈 当前持仓:\n\n"
+    for pos in positions:
+        result += f"交易对: {pos.get('symbol', 'N/A')}\n"
+        result += f"数量: {pos.get('contracts', 'N/A')}\n"
+        result += f"盈亏: {pos.get('unrealizedPnl', 'N/A')}\n\n"
+    return result
 
 # 键盘布局
 MAIN_KEYBOARD = InlineKeyboardMarkup([
