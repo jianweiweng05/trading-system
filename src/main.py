@@ -41,13 +41,14 @@ def rate_limit_check(client_ip: str) -> bool:
     return True
 
 async def run_safe_polling(telegram_app):
+    """运行 Telegram 轮询"""
     try:
-        logger.info("启动Telegram轮询...")
+        logger.info("启动 Telegram 轮询...")
         await telegram_app.updater.start_polling(
             drop_pending_updates=True,
             timeout=10
         )
-        logger.info(f"轮询运行中 (模式: {CONFIG.run_mode.upper()})")
+        logger.info("✅ Telegram 轮询启动成功")
         
         while True:
             await asyncio.sleep(3600)
@@ -55,28 +56,30 @@ async def run_safe_polling(telegram_app):
     except asyncio.CancelledError:
         logger.info("停止轮询...")
         await telegram_app.updater.stop()
+        logger.info("✅ Telegram 轮询已停止")
         raise
     except Exception as e:
-        logger.warning(f"轮询异常: {e}")
+        logger.error(f"轮询异常: {e}")
         raise
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     exchange = None
     telegram_initialized = False
+    polling_task = None
     
     try:
         logger.info("系统启动中...")
         
-        # 首先初始化数据库
+        # 1. 首先初始化数据库
         await init_db()
         
-        # 然后初始化配置
+        # 2. 然后初始化配置
         config = await init_config()
         if not config:
             raise RuntimeError("配置初始化失败")
         
-        # 初始化交易所
+        # 3. 初始化交易所
         exchange = binance({
             'apiKey': config.binance_api_key,
             'secret': config.binance_api_secret,
@@ -84,57 +87,64 @@ async def lifespan(app: FastAPI):
             'options': {'defaultType': 'future'}
         })
         app.state.exchange = exchange
+        logger.info("✅ 交易所连接已建立")
         
-        # 初始化Telegram
+        # 4. 初始化Telegram
         telegram_app = ApplicationBuilder().token(config.telegram_bot_token).build()
         app.state.telegram_app = telegram_app
+        logger.info("✅ Telegram 应用已创建")
         
         await initialize_bot(app)
         telegram_initialized = True
+        logger.info("✅ Telegram Bot 已初始化")
         
         await SystemState.set_state("ACTIVE", telegram_app)
+        logger.info("✅ 系统状态已设置为 ACTIVE")
         
         logger.info("系统启动完成")
         yield
         
-        # 启动轮询任务
+        # 5. 启动轮询任务
         polling_task = asyncio.create_task(run_safe_polling(telegram_app))
         app.state.polling_task = polling_task
+        logger.info("✅ 轮询任务已启动")
+        
+        # 等待轮询任务完成
         await polling_task
         
     except asyncio.CancelledError:
         logger.info("收到停止信号")
     except Exception as e:
-        logger.warning(f"启动失败: {e}")
+        logger.error(f"启动失败: {e}")
         raise
     finally:
         logger.info("系统关闭中...")
         
         # 停止轮询
-        if hasattr(app.state, 'polling_task'):
-            app.state.polling_task.cancel()
+        if polling_task:
+            polling_task.cancel()
             try:
-                await app.state.polling_task
+                await polling_task
             except asyncio.CancelledError:
-                logger.info("轮询已停止")
+                logger.info("轮询任务已取消")
             except Exception as e:
-                logger.warning(f"停止轮询失败: {e}")
+                logger.error(f"停止轮询失败: {e}")
         
         # 停止Telegram服务
         if telegram_initialized:
             try:
                 await stop_bot_services(app)
             except Exception as e:
-                logger.warning(f"停止Telegram失败: {e}")
+                logger.error(f"停止Telegram服务失败: {e}")
         
         # 关闭交易所连接
         if exchange:
             try:
                 await exchange.close()
             except Exception as e:
-                logger.warning(f"关闭交易所失败: {e}")
+                logger.error(f"关闭交易所失败: {e}")
         
-        logger.info("系统已关闭")
+        logger.info("✅ 系统已安全关闭")
 
 # FastAPI应用
 app = FastAPI(
@@ -157,7 +167,9 @@ async def startup_check():
     checks = {
         "config_loaded": bool(CONFIG),
         "db_accessible": False,
-        "exchange_ready": False
+        "exchange_ready": False,
+        "telegram_initialized": hasattr(app.state, 'telegram_app'),
+        "telegram_running": False
     }
     
     try:
@@ -168,6 +180,12 @@ async def startup_check():
         if hasattr(app.state, 'exchange'):
             await app.state.exchange.fetch_time()
             checks["exchange_ready"] = True
+            
+        if hasattr(app.state, 'telegram_app'):
+            try:
+                checks["telegram_running"] = app.state.telegram_app.updater.running
+            except:
+                pass
             
     except Exception as e:
         logger.info(f"健康检查失败: {e}")
