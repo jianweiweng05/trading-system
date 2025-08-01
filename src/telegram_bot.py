@@ -109,28 +109,38 @@ async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """处理按钮点击"""
     query = update.callback_query
-    await query.answer()
+    logger.info(f"🔥 按钮回调触发: {query.data}")
     
-    if query.data == "status":
-        stats = await get_system_stats()
-        status_text = await format_system_status(stats)
-        await query.edit_message_text(status_text, parse_mode="HTML")
-    elif query.data == "positions":
-        if not hasattr(context.application, 'state') or not context.application.state.exchange:
-            await query.edit_message_text("❌ 交易所未连接")
-            return
+    try:
+        await query.answer()
+        await asyncio.sleep(0.1)
+        await query.edit_message_text("⏳ 正在处理...")
         
-        try:
-            positions = await context.application.state.exchange.fetch_positions()
-            if not positions:
-                await query.edit_message_text("📊 当前无持仓")
+        if query.data == "status":
+            stats = await get_system_stats()
+            status_text = await format_system_status(stats)
+            await query.edit_message_text(status_text, parse_mode="HTML")
+            
+        elif query.data == "positions":
+            if not hasattr(context.application, 'state') or not context.application.state.exchange:
+                await query.edit_message_text("❌ 交易所未连接")
                 return
             
-            position_text = await format_position_info(positions)
-            await query.edit_message_text(position_text, parse_mode="HTML")
-        except Exception as e:
-            logger.error(f"获取持仓失败: {e}")
-            await query.edit_message_text("❌ 获取持仓失败")
+            try:
+                positions = await context.application.state.exchange.fetch_positions()
+                if not positions:
+                    await query.edit_message_text("📊 当前无持仓")
+                    return
+                
+                position_text = await format_position_info(positions)
+                await query.edit_message_text(position_text, parse_mode="HTML")
+            except Exception as e:
+                logger.error(f"获取持仓失败: {e}")
+                await query.edit_message_text("❌ 获取持仓失败")
+                
+    except Exception as e:
+        logger.error(f"按钮处理异常: {e}")
+        await query.answer("操作失败", show_alert=True)
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """错误处理"""
