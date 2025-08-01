@@ -47,22 +47,17 @@ async def run_safe_polling(telegram_app):
     """安全运行Telegram轮询任务"""
     try:
         logger.info("启动Telegram轮询...")
-        await telegram_app.initialize()
-        
-        # 关键修复：清除webhook并启动轮询
         await telegram_app.bot.delete_webhook(drop_pending_updates=True)
+        await telegram_app.initialize()
         await telegram_app.start()
-        logger.info("✅ Telegram轮询运行中")
         
-        # 保持连接，但使用更短的心跳间隔
-        while True:
-            await asyncio.sleep(1)  # 从3600改为1秒
+        while telegram_app.running:
+            await asyncio.sleep(0.3)
             
-    except asyncio.CancelledError:
-        logger.info("收到停止信号")
     except Exception as e:
-        logger.error(f"轮询异常: {e}", exc_info=True)
-        raise
+        logger.warning(f"轮询异常: {e}")
+        if "running" not in str(e).lower():
+            raise
     finally:
         await telegram_app.stop()
         await telegram_app.shutdown()
