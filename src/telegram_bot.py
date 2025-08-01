@@ -7,11 +7,20 @@ from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, Mes
 from telegram.error import TelegramError
 
 from config import CONFIG
-from utils.decorators import execute_safe
-from utils.helpers import format_position_info, format_system_status
+# 删除这行: from utils.decorators import execute_safe
 from database import get_system_stats
 
 logger = logging.getLogger(__name__)
+
+# 添加这个简单的装饰器替代execute_safe
+def execute_safe(func):
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in {func.__name__}: {e}")
+            return None
+    return wrapper
 
 # 键盘布局
 MAIN_KEYBOARD = InlineKeyboardMarkup([
