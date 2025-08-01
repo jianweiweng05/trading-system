@@ -6,6 +6,7 @@ pandas==1.5.3
 numpy==1.24.4
 pandas-ta==0.3.14b0
 sqlalchemy==1.4.46
-
-# 新增 pydantic 的配套库
+python-dotenv==1.0.0
+pydantic==1.10.7
 pydantic-settings==2.2.1
+discord.py==2.3.2
