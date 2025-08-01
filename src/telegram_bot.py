@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, MessageHandler, filters, Application
+from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 from telegram.error import TelegramError
 
 from config import CONFIG
@@ -136,32 +136,40 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """错误处理"""
     logger.error(f"Update {update} caused error {context.error}")
 
-async def initialize_bot(fastapi_app):
+async def initialize_bot(app_instance):
     """初始化Telegram Bot"""
     logger.info("开始注册处理器...")
     
-    # 从FastAPI应用状态中获取Telegram应用
-    telegram_app = fastapi_app.state.telegram_app
+    # 获取Telegram应用实例
+    app = app_instance.state.telegram_app
     
-    # 注册命令处理器
-    telegram_app.add_handler(CommandHandler("start", start_command))
-    telegram_app.add_handler(CommandHandler("help", help_command))
-    telegram_app.add_handler(CommandHandler("status", status_command))
-    telegram_app.add_handler(CommandHandler("positions", positions_command))
+    # 清除可能存在的旧处理器
+    app.handlers.clear()
     
-    # 注册按钮回调处理器
-    telegram_app.add_handler(CallbackQueryHandler(handle_button_click))
+    # 定义所有处理器
+    handlers = [
+        CommandHandler("start", start_command),
+        CommandHandler("help", help_command),
+        CommandHandler("status", status_command),
+        CommandHandler("positions", positions_command),
+        CallbackQueryHandler(handle_button_click),
+        MessageHandler(filters.ALL, error_handler)
+    ]
     
-    # 注册错误处理器
-    telegram_app.add_handler(MessageHandler(filters.ALL, error_handler), group=-1)
+    # 注册所有处理器
+    for handler in handlers:
+        app.add_handler(handler)
     
-    logger.info("✅ 处理器注册完成")
+    # 添加调试信息
+    logger.info(f"✅ 处理器注册完成 (数量: {len(handlers)})")
+    for handler in handlers:
+        logger.info(f"处理器类型: {type(handler).__name__}")
 
-async def stop_bot_services(fastapi_app):
+async def stop_bot_services(app_instance):
     """停止Bot服务"""
     logger.info("正在停止Telegram服务...")
-    if hasattr(fastapi_app.state, 'telegram_app'):
-        telegram_app = fastapi_app.state.telegram_app
+    if hasattr(app_instance.state, 'telegram_app'):
+        telegram_app = app_instance.state.telegram_app
         if telegram_app.running:
             await telegram_app.stop()
             await telegram_app.shutdown()
