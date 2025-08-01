@@ -1,7 +1,13 @@
 import logging
 from functools import wraps
 from telegram import Update, ReplyKeyboardMarkup
-from telegram.ext import ContextTypes, CommandHandler, MessageHandler, filters, Application
+from telegram.ext import (
+    ContextTypes,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    Application
+)
 
 from config import CONFIG
 from system_state import SystemState
@@ -36,7 +42,7 @@ def execute_safe(func):
             return await func(update, context, *args, **kwargs)
             
         except Exception as e:
-            logger.error(f"命令执行失败: {e}")
+            logger.error(f"命令执行失败: {e}", exc_info=True)
             await update.message.reply_text("⚠️ 出错了，请查看日志")
     return wrapper
 
@@ -59,8 +65,8 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 await exchange.fetch_time()
                 exchange_status = "✅ 正常"
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"交易所连接检查失败: {e}")
 
         report = (
             f"📊 系统状态\n"
@@ -71,22 +77,26 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(report)
     except Exception as e:
-        logger.error(f"获取状态失败: {e}")
+        logger.error(f"获取状态失败: {e}", exc_info=True)
         await update.message.reply_text("❌ 获取状态失败")
 
 @execute_safe
 async def positions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    positions = await get_open_positions()
-    if not positions:
-        await update.message.reply_text("📭 当前无持仓")
-        return
+    try:
+        positions = await get_open_positions()
+        if not positions:
+            await update.message.reply_text("📭 当前无持仓")
+            return
 
-    report = "📈 当前持仓:\n"
-    for p in positions:
-        report += f"\n{p['symbol']} - {p['trade_type']}\n"
-        report += f"数量: {p['quantity']}\n"
-        report += f"入场价: ${p['entry_price']:.2f}\n"
-    await update.message.reply_text(report)
+        report = "📈 当前持仓:\n"
+        for p in positions:
+            report += f"\n{p['symbol']} - {p['trade_type']}\n"
+            report += f"数量: {p['quantity']}\n"
+            report += f"入场价: ${p['entry_price']:.2f}\n"
+        await update.message.reply_text(report)
+    except Exception as e:
+        logger.error(f"获取持仓失败: {e}", exc_info=True)
+        await update.message.reply_text("❌ 获取持仓失败")
 
 @execute_safe
 async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -114,25 +124,34 @@ async def back_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 @execute_safe
 async def halt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await SystemState.set_state("HALTED", context.bot_data.get('application'))
+    application = context.bot_data.get('application')
+    if not application:
+        logger.error("无法获取application实例")
+        return
+        
+    await SystemState.set_state("HALTED", application)
     await update.message.reply_text("🛑 交易已暂停")
 
 @execute_safe
 async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await SystemState.set_state("ACTIVE", context.bot_data.get('application'))
+    application = context.bot_data.get('application')
+    if not application:
+        logger.error("无法获取application实例")
+        return
+        
+    await SystemState.set_state("ACTIVE", application)
     await update.message.reply_text("🟢 交易已恢复")
 
 # 状态变更通知
 async def state_change_alert(old_state: str, new_state: str, application: Application):
     try:
-        # 从 application 对象中获取配置
-        if not hasattr(application, 'bot_data') or not application.bot_data.get('config'):
-            logger.warning("配置未正确加载，跳过状态变更通知")
+        if not application or not hasattr(application, 'bot_data'):
+            logger.warning("Application 实例异常")
             return
             
         config = application.bot_data.get('config')
-        if not hasattr(config, 'admin_chat_id'):
-            logger.warning("admin_chat_id 未配置，跳过状态变更通知")
+        if not config or not hasattr(config, 'admin_chat_id'):
+            logger.warning("配置缺失，跳过通知")
             return
             
         logger.info(f"发送状态变更通知: {old_state} -> {new_state}")
@@ -141,65 +160,69 @@ async def state_change_alert(old_state: str, new_state: str, application: Applic
             text=f"⚠️ 状态变更: {old_state} -> {new_state}"
         )
     except Exception as e:
-        logger.error(f"发送状态变更通知失败: {e}")
+        logger.error(f"发送通知失败: {e}", exc_info=True)
 
 # Bot初始化
 async def initialize_bot(app_instance):
-    logger.info("开始初始化 Telegram Bot...")
-    
-    if not hasattr(app_instance.state, 'telegram_app'):
-        logger.error("telegram_app 未初始化")
-        return
+    """初始化并注册所有处理器"""
+    try:
+        if not hasattr(app_instance.state, 'telegram_app'):
+            logger.error("telegram_app 未初始化")
+            return
 
-    app = app_instance.state.telegram_app
-    logger.info("获取到 telegram_app 实例")
-    
-    SystemState.set_alert_callback(state_change_alert)
-    logger.info("设置状态变更回调")
+        app = app_instance.state.telegram_app
+        logger.info("开始注册处理器...")
+        
+        # 注入必要引用
+        app.bot_data['application'] = app
+        SystemState.set_alert_callback(state_change_alert)
 
-    # 注册所有命令处理器
-    handlers = [
-        CommandHandler("start", start_command),
-        CommandHandler("status", status_command),
-        CommandHandler("positions", positions_command),
-        CommandHandler("logs", logs_command),
-        CommandHandler("halt", halt_command),
-        CommandHandler("resume", resume_command),
-        CommandHandler("settings", settings_command),
-        MessageHandler(filters.Regex('^📊 系统状态$'), status_command),
-        MessageHandler(filters.Regex('^📈 当前持仓$'), positions_command),
-        MessageHandler(filters.Regex('^📋 操作日志$'), logs_command),
-        MessageHandler(filters.Regex('^⚙️ 设置$'), settings_command),
-        MessageHandler(filters.Regex('^🔁 切换模式$'), toggle_mode_command),
-        MessageHandler(filters.Regex('^🔙 返回主菜单$'), back_command),
-        MessageHandler(filters.Regex('^🔴 紧急暂停$'), halt_command),
-        MessageHandler(filters.Regex('^🟢 恢复运行$'), resume_command)
-    ]
+        # 命令处理器
+        command_handlers = [
+            CommandHandler("start", start_command),
+            CommandHandler("status", status_command),
+            CommandHandler("positions", positions_command),
+            CommandHandler("logs", logs_command),
+            CommandHandler("halt", halt_command),
+            CommandHandler("resume", resume_command),
+            CommandHandler("settings", settings_command)
+        ]
 
-    for handler in handlers:
-        app.add_handler(handler)
-        logger.info(f"注册处理器: {type(handler).__name__}")
+        # 消息处理器
+        message_handlers = [
+            MessageHandler(filters.Regex('^📊 系统状态$'), status_command),
+            MessageHandler(filters.Regex('^📈 当前持仓$'), positions_command),
+            MessageHandler(filters.Regex('^📋 操作日志$'), logs_command),
+            MessageHandler(filters.Regex('^⚙️ 设置$'), settings_command),
+            MessageHandler(filters.Regex('^🔁 切换模式$'), toggle_mode_command),
+            MessageHandler(filters.Regex('^🔙 返回$'), back_command),
+            MessageHandler(filters.Regex('^🔴 紧急暂停$'), halt_command),
+            MessageHandler(filters.Regex('^🟢 恢复运行$'), resume_command)
+        ]
 
-    await app.initialize()
-    logger.info("Telegram Bot 初始化完成")
-    
-    await app.start()
-    logger.info("Telegram Bot 启动完成")
+        # 批量注册
+        for handler in command_handlers + message_handlers:
+            app.add_handler(handler)
+
+        logger.info("✅ 处理器注册完成")
+    except Exception as e:
+        logger.error(f"初始化失败: {e}", exc_info=True)
+        raise
 
 # Bot停止
 async def stop_bot_services(app_instance):
-    logger.info("开始停止 Telegram Bot 服务...")
-    
-    if hasattr(app_instance.state, 'telegram_app'):
+    """安全停止Bot服务"""
+    try:
+        if not hasattr(app_instance.state, 'telegram_app'):
+            return
+
         app = app_instance.state.telegram_app
-        try:
-            await app.stop()
-            logger.info("Telegram Bot 已停止")
-        except Exception as e:
-            logger.error(f"停止 Telegram Bot 失败: {e}")
+        logger.info("开始停止Bot服务...")
         
-        try:
-            await app.shutdown()
-            logger.info("Telegram Bot 已关闭")
-        except Exception as e:
-            logger.error(f"关闭 Telegram Bot 失败: {e}")
+        await app.stop()
+        await app.shutdown()
+        
+        logger.info("✅ Bot服务已停止")
+    except Exception as e:
+        logger.error(f"停止服务失败: {e}", exc_info=True)
+        raise
