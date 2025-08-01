@@ -14,7 +14,24 @@ from database import init_db
 from system_state import SystemState
 from telegram_bot import initialize_bot, stop_bot_services
 
+# 新增敏感信息过滤类
+class SensitiveDataFilter(logging.Filter):
+    def filter(self, record):
+        if hasattr(record, 'msg') and isinstance(record.msg, str):
+            record.msg = record.msg.replace(
+                os.getenv('TELEGRAM_BOT_TOKEN', ''),
+                '<BOT_TOKEN>'
+            )
+        return True
+
 logger = logging.getLogger(__name__)
+logger.addFilter(SensitiveDataFilter())  # 添加过滤器
+
+# 统一日志格式
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 # 请求频率限制记录
 REQUEST_LOG = {}
@@ -41,40 +58,35 @@ def rate_limit_check(client_ip: str) -> bool:
     return True
 
 async def run_safe_polling(telegram_app):
-    """安全运行Telegram轮询任务"""
     try:
-        logger.info("启动Telegram轮询...")
+        logger.info("开始轮询...")
         await telegram_app.initialize()
         await telegram_app.start()
         logger.info("✅ Telegram轮询运行中")
         
         while True:
-            await asyncio.sleep(3600)
+            await asyncio.sleep(0.1)  # 修复：缩短sleep时间
             
     except asyncio.CancelledError:
         logger.info("收到停止信号")
         await telegram_app.stop()
         await telegram_app.shutdown()
     except Exception as e:
-        logger.warning(f"轮询异常: {e}")  # 修复点1：error改为warning
+        logger.warning(f"轮询异常: {e}")  # 修复：error改为warning
         raise
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI生命周期管理"""
     exchange = None
     polling_task = None
     
     try:
-        logger.info("🔄 系统启动中...")
+        logger.info("系统启动中...")
         
         await init_db()
-        logger.info("✅ 数据库初始化完成")
-        
         config = await init_config()
         if not config:
             raise RuntimeError("配置初始化失败")
-        logger.info(f"✅ 配置加载完成 (模式: {config.run_mode})")
         
         exchange = binance({
             'apiKey': config.binance_api_key,
@@ -83,43 +95,32 @@ async def lifespan(app: FastAPI):
             'options': {'defaultType': 'future'}
         })
         app.state.exchange = exchange
-        logger.info("✅ 交易所连接已建立")
         
         telegram_app = ApplicationBuilder().token(config.telegram_bot_token).build()
-        telegram_app.bot_data.update({
-            'config': config,
-            'exchange': exchange
-        })
+        telegram_app.bot_data['config'] = config
         app.state.telegram_app = telegram_app
-        logger.info("✅ Telegram应用初始化完成")
         
         await initialize_bot(app)
-        logger.info("✅ Telegram处理器注册完成")
         
         polling_task = asyncio.create_task(run_safe_polling(telegram_app))
         app.state.polling_task = polling_task
-        await asyncio.sleep(1)
-        logger.info("✅ 轮询任务已启动")
         
         await SystemState.set_state("ACTIVE", telegram_app)
-        logger.info("🚀 系统启动完成 (状态: ACTIVE)")
-        
+        logger.info("系统启动完成")
         yield
         
     except Exception as e:
-        logger.critical(f"启动失败: {e}", exc_info=True)
+        logger.error(f"启动失败: {e}")
         raise
     finally:
-        logger.info("🛑 系统关闭中...")
+        logger.info("系统关闭中...")
         
         if polling_task and not polling_task.done():
             polling_task.cancel()
             try:
                 await polling_task
-            except asyncio.CancelledError:
-                logger.info("轮询任务已取消")
             except Exception as e:
-                logger.warning(f"停止轮询出错: {e}")  # 修复点2：error改为warning
+                logger.warning(f"停止轮询时出错: {e}")  # 修复：error改为warning
         
         if hasattr(app.state, 'telegram_app'):
             await stop_bot_services(app)
@@ -127,14 +128,11 @@ async def lifespan(app: FastAPI):
         if exchange:
             try:
                 await exchange.close()
-                logger.info("✅ 交易所连接已关闭")
             except Exception as e:
-                logger.warning(f"关闭交易所失败: {e}")  # 修复点3：error改为warning
-        
-        logger.info("✅ 系统安全关闭")
+                logger.warning(f"关闭交易所失败: {e}")  # 修复：error改为warning
 
 app = FastAPI(
-    title="量化交易系统",
+    title="交易系统",
     version="7.2",
     lifespan=lifespan,
     debug=False
@@ -142,11 +140,12 @@ app = FastAPI(
 
 @app.get("/")
 async def root():
-    return {
-        "status": "running",
-        "version": app.version,
-        "mode": CONFIG.run_mode if hasattr(CONFIG, 'run_mode') else "unknown"
-    }
+    return {"status": "running", "version": app.version, "mode": CONFIG.run_mode if hasattr(CONFIG, 'run_mode') else "unknown"}
+
+# 新增HEAD方法支持
+@app.head("/")
+async def root_head():
+    return None
 
 @app.get("/health")
 async def health_check():
@@ -172,13 +171,13 @@ async def startup_check():
                 await app.state.exchange.fetch_time()
                 checks["exchange_ready"] = True
             except Exception as e:
-                logger.debug(f"交易所连接检查失败: {e}")  # 修复点4：添加debug日志
-        
+                logger.debug(f"交易所连接检查失败: {e}")  # 修复：添加debug日志
+            
         if checks["telegram_initialized"]:
             checks["telegram_running"] = not app.state.telegram_app._running.is_set()
             
     except Exception as e:
-        logger.warning(f"健康检查失败: {e}")  # 修复点5：error改为warning
+        logger.warning(f"健康检查失败: {e}")  # 修复：error改为warning
     
     return {
         "status": "ok" if all(checks.values()) else "degraded",
@@ -208,16 +207,10 @@ async def tradingview_webhook(request: Request):
         logger.info(f"收到交易信号: {signal_data}")
         return {"status": "processed"}
     except Exception as e:
-        logger.warning(f"信号处理失败: {e}")  # 修复点6：error改为warning
+        logger.warning(f"信号处理失败: {e}")  # 修复：error改为warning
         raise HTTPException(400, detail="无效的JSON数据")
 
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=port,
-        reload=False,
-        log_config=None
-    )
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
