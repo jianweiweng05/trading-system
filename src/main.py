@@ -98,6 +98,7 @@ async def lifespan(app: FastAPI):
         telegram_initialized = True
         logger.info("✅ Telegram Bot 已初始化")
         
+        # 确保所有组件都就绪后再设置状态
         await SystemState.set_state("ACTIVE", telegram_app)
         logger.info("✅ 系统状态已设置为 ACTIVE")
         
