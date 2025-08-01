@@ -68,21 +68,25 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("系统启动中...")
         
-        # 初始化配置和数据库
-        await init_config()
+        # 首先初始化数据库
         await init_db()
+        
+        # 然后初始化配置
+        config = await init_config()
+        if not config:
+            raise RuntimeError("配置初始化失败")
         
         # 初始化交易所
         exchange = binance({
-            'apiKey': CONFIG.binance_api_key,
-            'secret': CONFIG.binance_api_secret,
+            'apiKey': config.binance_api_key,
+            'secret': config.binance_api_secret,
             'enableRateLimit': True,
             'options': {'defaultType': 'future'}
         })
         app.state.exchange = exchange
         
         # 初始化Telegram
-        telegram_app = ApplicationBuilder().token(CONFIG.telegram_bot_token).build()
+        telegram_app = ApplicationBuilder().token(config.telegram_bot_token).build()
         app.state.telegram_app = telegram_app
         
         await initialize_bot(app)
@@ -102,6 +106,7 @@ async def lifespan(app: FastAPI):
         logger.info("收到停止信号")
     except Exception as e:
         logger.warning(f"启动失败: {e}")
+        raise
     finally:
         logger.info("系统关闭中...")
         
@@ -136,12 +141,12 @@ app = FastAPI(
     title="交易系统",
     version="7.2",
     lifespan=lifespan,
-    debug=CONFIG.log_level == "DEBUG" if CONFIG else False
+    debug=False
 )
 
 @app.get("/")
 def root():
-    return {"status": "running", "version": app.version, "mode": CONFIG.run_mode}
+    return {"status": "running", "version": app.version, "mode": CONFIG.run_mode if CONFIG else "unknown"}
 
 @app.get("/health")
 async def health_check():
@@ -205,4 +210,4 @@ async def tradingview_webhook(request: Request):
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
