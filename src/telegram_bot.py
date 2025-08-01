@@ -125,14 +125,19 @@ async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 状态变更通知
 async def state_change_alert(old_state: str, new_state: str, application: Application):
     try:
-        # 添加配置检查
-        if not CONFIG or not hasattr(CONFIG, 'admin_chat_id'):
+        # 从 application 对象中获取配置
+        if not hasattr(application, 'bot_data') or not application.bot_data.get('config'):
             logger.warning("配置未正确加载，跳过状态变更通知")
+            return
+            
+        config = application.bot_data.get('config')
+        if not hasattr(config, 'admin_chat_id'):
+            logger.warning("admin_chat_id 未配置，跳过状态变更通知")
             return
             
         logger.info(f"发送状态变更通知: {old_state} -> {new_state}")
         await application.bot.send_message(
-            chat_id=CONFIG.admin_chat_id,
+            chat_id=config.admin_chat_id,
             text=f"⚠️ 状态变更: {old_state} -> {new_state}"
         )
     except Exception as e:
