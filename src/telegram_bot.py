@@ -3,16 +3,14 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import ContextTypes, CallbackQueryHandler, CommandHandler, MessageHandler, filters, Application
 from telegram.error import TelegramError
 
 from config import CONFIG
-# 删除这行: from database import get_system_stats
-from database import engine  # 只导入需要的engine
+from database import engine
 
 logger = logging.getLogger(__name__)
 
-# 添加这个简单的装饰器替代execute_safe
 def execute_safe(func):
     async def wrapper(*args, **kwargs):
         try:
@@ -22,12 +20,10 @@ def execute_safe(func):
             return None
     return wrapper
 
-# 添加获取系统状态的函数
 async def get_system_stats():
     """获取系统统计信息"""
     try:
         async with engine.connect() as conn:
-            # 这里可以根据需要添加实际的数据库查询
             return {
                 "status": "active",
                 "uptime": str(datetime.now()),
@@ -37,7 +33,6 @@ async def get_system_stats():
         logger.error(f"获取系统状态失败: {e}")
         return {"status": "error", "error": str(e)}
 
-# 添加格式化函数
 async def format_system_status(stats: dict) -> str:
     """格式化系统状态"""
     return f"""
@@ -47,7 +42,6 @@ async def format_system_status(stats: dict) -> str:
 数据库: {stats.get('database', 'unknown')}
 """
 
-# 添加持仓格式化函数
 async def format_position_info(positions: list) -> str:
     """格式化持仓信息"""
     if not positions:
@@ -60,7 +54,6 @@ async def format_position_info(positions: list) -> str:
         result += f"盈亏: {pos.get('unrealizedPnl', 'N/A')}\n\n"
     return result
 
-# 键盘布局
 MAIN_KEYBOARD = InlineKeyboardMarkup([
     [InlineKeyboardButton("📊 系统状态", callback_data="status")],
     [InlineKeyboardButton("📈 当前持仓", callback_data="positions")]
@@ -143,30 +136,35 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """错误处理"""
     logger.error(f"Update {update} caused error {context.error}")
 
-async def initialize_bot(app):
+async def initialize_bot(fastapi_app):
     """初始化Telegram Bot"""
     logger.info("开始注册处理器...")
     
+    # 从FastAPI应用状态中获取Telegram应用
+    telegram_app = fastapi_app.state.telegram_app
+    
     # 注册命令处理器
-    app.add_handler(CommandHandler("start", start_command))
-    app.add_handler(CommandHandler("help", help_command))
-    app.add_handler(CommandHandler("status", status_command))
-    app.add_handler(CommandHandler("positions", positions_command))
+    telegram_app.add_handler(CommandHandler("start", start_command))
+    telegram_app.add_handler(CommandHandler("help", help_command))
+    telegram_app.add_handler(CommandHandler("status", status_command))
+    telegram_app.add_handler(CommandHandler("positions", positions_command))
     
     # 注册按钮回调处理器
-    app.add_handler(CallbackQueryHandler(handle_button_click))
+    telegram_app.add_handler(CallbackQueryHandler(handle_button_click))
     
     # 注册错误处理器
-    app.add_handler(MessageHandler(filters.ALL, error_handler), group=-1)
+    telegram_app.add_handler(MessageHandler(filters.ALL, error_handler), group=-1)
     
     logger.info("✅ 处理器注册完成")
 
-async def stop_bot_services(app):
+async def stop_bot_services(fastapi_app):
     """停止Bot服务"""
     logger.info("正在停止Telegram服务...")
-    if hasattr(app.state, 'telegram_app'):
-        await app.state.telegram_app.stop()
-        await app.state.telegram_app.shutdown()
+    if hasattr(fastapi_app.state, 'telegram_app'):
+        telegram_app = fastapi_app.state.telegram_app
+        if telegram_app.running:
+            await telegram_app.stop()
+            await telegram_app.shutdown()
     logger.info("✅ Telegram服务已停止")
 
 async def send_status_change_notification(old_state: str, new_state: str, telegram_app):
