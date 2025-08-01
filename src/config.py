@@ -75,6 +75,10 @@ async def init_config() -> AppConfig:
         # 从数据库加载配置
         await strategy_config.load_from_db()
         
+        # 验证配置是否正确初始化
+        if not CONFIG.binance_api_key or not CONFIG.binance_api_secret:
+            raise ValueError("关键配置缺失：API密钥未设置")
+        
         logging.info(f"配置加载成功 - 模式: {CONFIG.run_mode}")
         return CONFIG
         
