@@ -41,25 +41,17 @@ def rate_limit_check(client_ip: str) -> bool:
     return True
 
 async def run_safe_polling(telegram_app):
-    """运行 Telegram 轮询"""
     try:
-        logger.info("启动 Telegram 轮询...")
-        await telegram_app.updater.start_polling(
-            drop_pending_updates=True,
-            timeout=10
-        )
-        logger.info("✅ Telegram 轮询启动成功")
-        
-        while True:
+        logger.info("开始轮询...")
+        await telegram_app.start_polling()
+        logger.info("轮询运行中")
+        while True:  # 保持任务持续运行
             await asyncio.sleep(3600)
-            
     except asyncio.CancelledError:
-        logger.info("停止轮询...")
-        await telegram_app.updater.stop()
-        logger.info("✅ Telegram 轮询已停止")
-        raise
+        logger.info("收到停止信号")
+        await telegram_app.stop_polling()
     except Exception as e:
-        logger.error(f"轮询异常: {e}")
+        logger.error(f"轮询崩溃: {e}")
         raise
 
 @asynccontextmanager
@@ -91,7 +83,7 @@ async def lifespan(app: FastAPI):
         
         # 4. 初始化Telegram
         telegram_app = ApplicationBuilder().token(config.telegram_bot_token).build()
-        telegram_app.bot_data['config'] = config  # 将配置存入 bot_data
+        telegram_app.bot_data['config'] = config
         app.state.telegram_app = telegram_app
         logger.info("✅ Telegram 应用已创建")
         
@@ -99,20 +91,20 @@ async def lifespan(app: FastAPI):
         telegram_initialized = True
         logger.info("✅ Telegram Bot 已初始化")
         
-        # 确保所有组件都就绪后再设置状态
-        await SystemState.set_state("ACTIVE", telegram_app)
-        logger.info("✅ 系统状态已设置为 ACTIVE")
-        
-        logger.info("系统启动完成")
-        yield
-        
-        # 5. 启动轮询任务
+        # 5. 启动轮询任务（必须在yield之前）
         polling_task = asyncio.create_task(run_safe_polling(telegram_app))
         app.state.polling_task = polling_task
         logger.info("✅ 轮询任务已启动")
         
-        # 等待轮询任务完成
-        await polling_task
+        # 短暂等待确保任务启动
+        await asyncio.sleep(0.1)
+        
+        # 6. 设置系统状态
+        await SystemState.set_state("ACTIVE", telegram_app)
+        logger.info("✅ 系统状态已设置为 ACTIVE")
+        
+        logger.info("系统启动完成")
+        yield  # FastAPI服务正式启动
         
     except asyncio.CancelledError:
         logger.info("收到停止信号")
@@ -128,9 +120,9 @@ async def lifespan(app: FastAPI):
             try:
                 await polling_task
             except asyncio.CancelledError:
-                logger.info("轮询任务已取消")
+                logger.info("轮询任务已正常停止")
             except Exception as e:
-                logger.error(f"停止轮询失败: {e}")
+                logger.error(f"停止轮询时出错: {e}")
         
         # 停止Telegram服务
         if telegram_initialized:
