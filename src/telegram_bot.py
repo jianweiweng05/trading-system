@@ -43,6 +43,7 @@ def execute_safe(func):
 # 基础命令
 @execute_safe
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"收到启动命令，用户ID: {update.effective_user.id}")
     await update.message.reply_text("🚀 交易机器人已启动", reply_markup=REPLY_MARKUP)
 
 @execute_safe
@@ -65,11 +66,12 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📊 系统状态\n"
             f"状态: {state}\n"
             f"模式: {CONFIG.run_mode.upper()}\n"
-            f"持仓: {len(positionments)}个\n"
+            f"持仓: {len(positions)}个\n"
             f"交易所: {exchange_status}"
         )
         await update.message.reply_text(report)
     except Exception as e:
+        logger.error(f"获取状态失败: {e}")
         await update.message.reply_text("❌ 获取状态失败")
 
 @execute_safe
@@ -123,20 +125,27 @@ async def resume_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # 状态变更通知
 async def state_change_alert(old_state: str, new_state: str, application: Application):
     try:
+        logger.info(f"发送状态变更通知: {old_state} -> {new_state}")
         await application.bot.send_message(
             chat_id=CONFIG.admin_chat_id,
             text=f"⚠️ 状态变更: {old_state} -> {new_state}"
         )
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"发送状态变更通知失败: {e}")
 
 # Bot初始化
 async def initialize_bot(app_instance):
+    logger.info("开始初始化 Telegram Bot...")
+    
     if not hasattr(app_instance.state, 'telegram_app'):
+        logger.error("telegram_app 未初始化")
         return
 
     app = app_instance.state.telegram_app
+    logger.info("获取到 telegram_app 实例")
+    
     SystemState.set_alert_callback(state_change_alert)
+    logger.info("设置状态变更回调")
 
     # 注册所有命令处理器
     handlers = [
@@ -159,14 +168,28 @@ async def initialize_bot(app_instance):
 
     for handler in handlers:
         app.add_handler(handler)
+        logger.info(f"注册处理器: {type(handler).__name__}")
 
     await app.initialize()
+    logger.info("Telegram Bot 初始化完成")
+    
     await app.start()
-    logger.info("Bot已启动")
+    logger.info("Telegram Bot 启动完成")
 
 # Bot停止
 async def stop_bot_services(app_instance):
+    logger.info("开始停止 Telegram Bot 服务...")
+    
     if hasattr(app_instance.state, 'telegram_app'):
         app = app_instance.state.telegram_app
-        await app.stop()
-        await app.shutdown()
+        try:
+            await app.stop()
+            logger.info("Telegram Bot 已停止")
+        except Exception as e:
+            logger.error(f"停止 Telegram Bot 失败: {e}")
+        
+        try:
+            await app.shutdown()
+            logger.info("Telegram Bot 已关闭")
+        except Exception as e:
+            logger.error(f"关闭 Telegram Bot 失败: {e}")
