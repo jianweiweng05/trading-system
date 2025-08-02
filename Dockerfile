@@ -37,11 +37,13 @@ COPY --chown=trader:trader . .
 ENV PATH=/home/trader/.local/bin:$PATH \
     PYTHONPATH=/app \
     PYTHONMALLOC=malloc \
-    MALLOC_ARENA_MAX=2
+    MALLOC_ARENA_MAX=2 \
+    PYTHONOPTIMIZE=1 \
+    UVICORN_MAX_WORKERS=1
 
 USER trader
 
 HEALTHCHECK --interval=30s --timeout=3s \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["sh", "-c", "exec uvicorn src.main:app --host 0.0.0.0 --port 8000 --no-access-log --workers $(nproc) --limit-max-requests 10000"]
+CMD ["sh", "-c", "exec uvicorn src.main:app --host 0.0.0.0 --port 8000 --no-access-log --workers 1 --limit-max-requests 1000"]
