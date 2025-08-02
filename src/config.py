@@ -1,92 +1,105 @@
 import logging
 import os
-from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 from pydantic import Field
-from typing import Optional
+from typing import Optional, ClassVar
 
-load_dotenv()
+# Discord专属配置
+class DiscordConfig(BaseSettings):
+    token: str = Field(..., 
+        env="DISCORD_TOKEN",
+        description="Discord Bot Token")
+    channel_id: str = Field(...,
+        env="DISCORD_CHANNEL_ID",
+        description="交易通知频道ID")
+    command_prefix: str = Field(default="!",
+        env="DISCORD_PREFIX",
+        description="Bot命令前缀")
 
-# 配置类
-class StaticConfig(BaseSettings):
-    admin_chat_id: str = Field(..., env="ADMIN_CHAT_ID")
-    binance_api_key: str = Field(..., env="BINANCE_API_KEY")
-    binance_api_secret: str = Field(..., env="BINANCE_API_SECRET")
-    telegram_bot_token: str = Field(..., env="TELEGRAM_BOT_TOKEN")
-    deepseek_api_key: str = Field(..., env="DEEPSEEK_API_KEY")
-    tv_webhook_secret: Optional[str] = Field(None, env="TV_WEBHOOK_SECRET")
-    log_level: str = Field("INFO", env="LOG_LEVEL")
-    
-    # Discord配置
-    discord_token: str = Field(env="DISCORD_TOKEN")
-    discord_channel_id: str = Field(env="DISCORD_CHANNEL_ID") 
-    discord_prefix: str = Field(default="!")
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+# 核心业务配置
+class TradingConfig(BaseSettings):
+    binance_api_key: str = Field(...,
+        env="BINANCE_API_KEY",
+        description="币安API Key")
+    binance_api_secret: str = Field(...,
+        env="BINANCE_API_SECRET",
+        description="币安API Secret")
+    tv_webhook_secret: str = Field(...,
+        env="TV_WEBHOOK_SECRET",
+        description="TradingView签名密钥")
+    run_mode: str = Field(default="simulate",
+        env="RUN_MODE",
+        description="运行模式: simulate/live")
 
+# 策略配置（从数据库加载）
 class StrategyConfig:
-    def __init__(self):
-        self.run_mode: str = "simulate"
-        self.leverage: int = 3
-        self.macro_coefficient: float = 1.0
-        self.resonance_coefficient: float = 1.0
+    leverage: ClassVar[int] = 3
+    macro_coefficient: ClassVar[float] = 1.0
+    resonance_coefficient: ClassVar[float] = 1.0
 
     async def load_from_db(self):
         from database import get_setting
-        try:
-            self.run_mode = await get_setting('run_mode', self.run_mode)
-            self.macro_coefficient = float(await get_setting('macro_coefficient', str(self.macro_coefficient)))
-            self.resonance_coefficient = float(await get_setting('resonance_coefficient', str(self.resonance_coefficient)))
-        except Exception as e:
-            logging.warning(f"配置加载失败，使用默认值: {e}")
+        self.leverage = int(await get_setting('leverage', self.leverage))
 
+# 全局配置聚合
 class AppConfig:
-    def __init__(self, static_config: StaticConfig, strategy_config: StrategyConfig):
-        self._static = static_config
-        self._strategy = strategy_config
-
-    def __getattr__(self, name):
-        if hasattr(self._strategy, name):
-            return getattr(self._strategy, name)
-        if hasattr(self._static, name):
-            return getattr(self._static, name)
-        raise AttributeError(f"'AppConfig' object has no attribute '{name}'")
-
-# 全局配置实例
-CONFIG: Optional[AppConfig] = None
-
-async def init_config() -> AppConfig:
-    global CONFIG
-    if CONFIG:
-        return CONFIG
+    def __init__(self):
+        self._discord = DiscordConfig()
+        self._trading = TradingConfig()
+        self._strategy = StrategyConfig()
         
-    try:
-        # 加载静态配置
-        static_config = StaticConfig()
-        
-        # 设置日志级别
         logging.basicConfig(
-            level=static_config.log_level,
+            level=logging.INFO,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
+        self._setup_log_filter()
+
+    def _setup_log_filter(self):
+        class SensitiveFilter(logging.Filter):
+            def __init__(self, discord_config, trading_config):
+                super().__init__()
+                self.discord = discord_config
+                self.trading = trading_config
+            
+            def filter(self, record):
+                if hasattr(record, 'msg'):
+                    msg = str(record.msg)
+                    # Discord敏感信息
+                    for field in DiscordConfig.__fields__:
+                        msg = msg.replace(getattr(self.discord, field), '[REDACTED]')
+                    # 交易敏感信息
+                    for field in ['binance_api_key', 'binance_api_secret', 'tv_webhook_secret']:
+                        msg = msg.replace(getattr(self.trading, field), '[REDACTED]')
+                    record.msg = msg
+                return True
+                
+        logging.getLogger().addFilter(
+            SensitiveFilter(self._discord, self._trading)
+        )
+
+    async def initialize(self):
+        await self._strategy.load_from_db()
+        self._validate()
+        logging.info(f"配置加载完成. 模式: {self._trading.run_mode}")
+
+    def _validate(self):
+        required_configs = {
+            'Discord Token': self._discord.token,
+            'Discord Channel ID': self._discord.channel_id,
+            'Binance API Key': self._trading.binance_api_key,
+            'Binance API Secret': self._trading.binance_api_secret,
+            'Webhook Secret': self._trading.tv_webhook_secret
+        }
         
-        # 创建策略配置
-        strategy_config = StrategyConfig()
-        CONFIG = AppConfig(static_config, strategy_config)
-        
-        # 从数据库加载配置
-        await strategy_config.load_from_db()
-        
-        # 验证配置是否正确初始化
-        if not CONFIG.binance_api_key or not CONFIG.binance_api_secret:
-            raise ValueError("关键配置缺失：API密钥未设置")
-        
-        logging.info(f"配置加载成功 - 模式: {CONFIG.run_mode}")
-        return CONFIG
-        
-    except Exception as e:
-        logging.critical(f"配置初始化失败: {e}")
-        raise RuntimeError("配置错误") from e
+        missing = [name for name, value in required_configs.items() if not value]
+        if missing:
+            raise ValueError(f"关键配置缺失: {', '.join(missing)}")
+
+    def __getattr__(self, name):
+        for config in [self._discord, self._trading, self._strategy]:
+            if hasattr(config, name):
+                return getattr(config, name)
+        raise AttributeError(f"未知配置项: {name}")
+
+# 全局单例
+CONFIG = AppConfig()
