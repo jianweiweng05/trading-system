@@ -50,19 +50,27 @@ async def on_command_error(ctx, error):
 @bot.command()
 async def status(ctx):
     """查看系统状态"""
-    embed = discord.Embed(title="📊 系统状态")
-    embed.add_field(name="运行模式", value=CONFIG.run_mode)
-    await ctx.send(embed=embed)
+    try:
+        embed = discord.Embed(title="📊 系统状态")
+        embed.add_field(name="运行模式", value=CONFIG.run_mode)
+        await ctx.send(embed=embed)
+        logger.info(f"✅ 用户 {ctx.author} 查看了系统状态")
+    except Exception as e:
+        logger.error(f"status 命令执行失败: {e}")
+        await ctx.send("❌ 获取系统状态失败")
 
 # ================= 生命周期管理 =================
 async def initialize_bot(app):
-    """替换原 telegram_bot 的初始化"""
+    """初始化 Discord Bot"""
     app.state.discord_bot = bot
     logger.info("🚀 正在启动 Discord Bot")
     await bot.start(CONFIG.discord_token)
 
 async def stop_bot_services(app):
-    """替换原 telegram 关闭逻辑"""
+    """关闭 Discord Bot"""
     if hasattr(app.state, 'discord_bot'):
         await bot.close()
         logger.info("🛑 Discord Bot 已关闭")
+
+# ================= 导出配置 =================
+__all__ = ['status', 'initialize_bot', 'stop_bot_services']
