@@ -92,6 +92,12 @@ async def lifespan(app: FastAPI):
             'exchange': exchange,
             'config': CONFIG
         }
+        
+        # 注册 Discord 命令
+        from discord_bot import status
+        discord_bot.add_command(status)
+        logger.info("✅ Discord 命令已注册")
+        
         asyncio.create_task(discord_bot.start(CONFIG.discord_token))
         logger.info("✅ Discord Bot 已启动")
         
