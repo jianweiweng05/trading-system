@@ -57,13 +57,32 @@ async def on_ready():
     await channel.send("✅ 交易系统连接成功")
     logger.info(f"Discord Bot 已登录: {discord_bot.user}")
 
-# --- FastAPI 应用定义 ---
-app = FastAPI(
-    title="量化交易系统",
-    version="7.2",
-    lifespan=lifespan,
-    debug=False
-)
+# --- 全局变量 ---
+REQUEST_LOG = {}
+
+# --- 辅助函数 ---
+def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
+    """验证Webhook签名"""
+    if not secret:
+        logger.warning("未设置webhook密钥，跳过验证")
+        return True
+    expected = hmac.new(secret.encode('utf-8'), payload, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+def rate_limit_check(client_ip: str) -> bool:
+    """请求频率限制检查"""
+    now = time.time()
+    if client_ip not in REQUEST_LOG:
+        REQUEST_LOG[client_ip] = []
+    
+    REQUEST_LOG[client_ip] = [t for t in REQUEST_LOG[client_ip] if now - t < 60]
+    
+    if len(REQUEST_LOG[client_ip]) >= 20:
+        logger.warning(f"IP {client_ip} 请求过于频繁")
+        return False
+    
+    REQUEST_LOG[client_ip].append(now)
+    return True
 
 # --- FastAPI 生命周期 ---
 @asynccontextmanager
@@ -122,6 +141,14 @@ async def lifespan(app: FastAPI):
                 logger.error(f"关闭交易所失败: {e}")
         
         logger.info("✅ 系统安全关闭")
+
+# --- FastAPI 应用定义 ---
+app = FastAPI(
+    title="量化交易系统",
+    version="7.2",
+    lifespan=lifespan,
+    debug=False
+)
 
 # --- FastAPI 路由 ---
 @app.get("/")
@@ -200,33 +227,6 @@ async def tradingview_webhook(request: Request):
     except Exception as e:
         logger.error(f"信号处理失败: {e}")
         raise HTTPException(400, detail="无效的JSON数据")
-
-# --- 辅助函数 ---
-def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
-    """验证Webhook签名"""
-    if not secret:
-        logger.warning("未设置webhook密钥，跳过验证")
-        return True
-    expected = hmac.new(secret.encode('utf-8'), payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(signature, expected)
-
-def rate_limit_check(client_ip: str) -> bool:
-    """请求频率限制检查"""
-    now = time.time()
-    if client_ip not in REQUEST_LOG:
-        REQUEST_LOG[client_ip] = []
-    
-    REQUEST_LOG[client_ip] = [t for t in REQUEST_LOG[client_ip] if now - t < 60]
-    
-    if len(REQUEST_LOG[client_ip]) >= 20:
-        logger.warning(f"IP {client_ip} 请求过于频繁")
-        return False
-    
-    REQUEST_LOG[client_ip].append(now)
-    return True
-
-# 全局变量
-REQUEST_LOG = {}
 
 # --- 导出配置 ---
 __all__ = ['app']
