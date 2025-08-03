@@ -1,7 +1,7 @@
 import logging
 import discord
 from discord.ext import commands
-from src.config import CONFIG  # 修改这里
+from src.config import CONFIG  # 修改导入路径
 
 # ================= 日志配置 =================
 logging.basicConfig(
