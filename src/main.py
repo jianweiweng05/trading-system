@@ -32,9 +32,23 @@ class SensitiveDataFilter(logging.Filter):
     def filter(self, record):
         if hasattr(record, "msg"):
             msg = str(record.msg)
-            for field in Config.__fields__.values():
-                if (value := getattr(CONFIG, field.name)):
-                    msg = msg.replace(value, "[REDACTED]")
+            # 获取所有字段名
+            field_names = [
+                'binance_api_key',
+                'binance_api_secret',
+                'discord_token',
+                'tv_webhook_secret',
+                'discord_channel_id',
+                'run_mode'
+            ]
+            
+            # 替换敏感信息
+            for field_name in field_names:
+                if hasattr(CONFIG, field_name):
+                    value = getattr(CONFIG, field_name)
+                    if value:
+                        msg = msg.replace(value, f"[REDACTED_{field_name.upper()}]")
+            
             record.msg = msg
         return True
 
