@@ -8,21 +8,26 @@ from sqlalchemy import (
 logger = logging.getLogger(__name__)
 
 def get_db_path():
-    if "RENDER" in os.environ:
-        base_path = "/var/data"
-    else:
-        base_path = os.path.join(os.getcwd(), "data")
+    """获取安全的数据库路径"""
+    # 统一使用项目目录下的data文件夹
+    base_path = os.path.join(os.getcwd(), "data")
     
-    os.makedirs(base_path, exist_ok=True)
+    try:
+        os.makedirs(base_path, exist_ok=True)
+        logger.info(f"数据库目录: {base_path}")
+    except Exception as e:
+        logger.error(f"创建数据库目录失败: {e}")
+        raise
     
+    # 检查目录权限
     if not os.access(base_path, os.W_OK):
         raise PermissionError(f"数据库目录不可写: {base_path}")
     
-    return os.path.join(base_path, "trading_system_v7.db")
+    db_path = os.path.join(base_path, "trading_system_v7.db")
+    logger.info(f"数据库路径: {db_path}")
+    return db_path
 
 DATABASE_URL = f"sqlite+aiosqlite:///{get_db_path()}"
-logger.info(f"数据库路径: {DATABASE_URL}")
-
 engine = create_async_engine(DATABASE_URL, echo=False)
 metadata = MetaData()
 
@@ -49,7 +54,7 @@ settings = Table(
 async def init_db():
     try:
         async with engine.begin() as conn:
-            logger.info(f"正在创建数据库表...")
+            logger.info("正在创建数据库表...")
             await conn.run_sync(metadata.create_all)
             logger.info("✅ 数据库表创建完成")
     except Exception as e:
@@ -91,7 +96,6 @@ async def set_setting(key: str, value: str):
         logger.error(f"设置配置项 '{key}' 失败: {str(e)}")
         raise
 
-# 添加交易相关函数
 async def get_open_positions():
     try:
         async with engine.connect() as conn:
