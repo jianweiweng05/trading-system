@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
         }
         
         # 注册 Discord 命令
-        from discord_bot import status
+        from src.discord_bot import status
         discord_bot.add_command(status)
         logger.info("✅ Discord 命令已注册")
         
