@@ -13,19 +13,8 @@ from discord.ext import commands
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
-# --- 配置类 ---
-class Config(BaseSettings):
-    binance_api_key: str = Field(..., env="BINANCE_API_KEY")
-    binance_api_secret: str = Field(..., env="BINANCE_API_SECRET")
-    discord_token: str = Field(..., env="DISCORD_TOKEN")
-    tv_webhook_secret: str = Field(..., env="TV_WEBHOOK_SECRET")
-    discord_channel_id: str = Field(..., env="DISCORD_CHANNEL_ID")
-    run_mode: str = Field(default="simulate", env="RUN_MODE")
-
-    class Config:
-        extra = "forbid"
-
-CONFIG = Config()
+# --- 导入配置 ---
+from src.config import CONFIG
 
 # --- 日志配置 ---
 logging.basicConfig(
