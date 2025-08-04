@@ -2,6 +2,7 @@ import logging
 import discord
 from discord import app_commands
 from discord.ext import commands
+import asyncio  # 添加这行
 from src.config import CONFIG
 
 # ================= 日志配置 =================
@@ -68,7 +69,10 @@ class TradingCommands(commands.Cog, name="交易系统"):
     
     def __init__(self, bot):
         self.bot = bot
-        self.bot.bot_data = {}  # 添加这行
+        self.bot.bot_data = {
+            'exchange': None,
+            'db_pool': None  # 添加数据库连接池
+        }
     
     async def check_exchange_status(self):
         """检查交易所连接状态"""
@@ -155,6 +159,10 @@ class TradingCommands(commands.Cog, name="交易系统"):
 async def initialize_bot(bot):
     """初始化 Discord Bot"""
     try:
+        # 初始化数据库连接池
+        from src.database import db_pool
+        bot.bot_data['db_pool'] = db_pool
+        
         # 等待交易所连接建立
         max_retries = 20
         retry_delay = 2
