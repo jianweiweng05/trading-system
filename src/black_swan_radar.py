@@ -12,6 +12,55 @@ from src.database import get_db_connection
 
 logger = logging.getLogger("discord_bot")
 
+# 全局变量
+_bot_instance = None
+
+def get_bot():
+    """获取Discord机器人实例"""
+    global _bot_instance
+    if _bot_instance is None:
+        _bot_instance = TradingBot()
+    return _bot_instance
+
+async def initialize_bot(bot):
+    """初始化Discord机器人"""
+    try:
+        # 等待交易所连接建立
+        max_retries = 20
+        retry_delay = 2
+        
+        for i in range(max_retries):
+            if hasattr(bot, 'bot_data') and bot.bot_data.get('exchange'):
+                logger.info("✅ 交易所连接已就绪，启动Discord机器人")
+                break
+            if i < max_retries - 1:
+                logger.info(f"等待交易所连接建立... ({i + 1}/{max_retries})")
+                await asyncio.sleep(retry_delay)
+        else:
+            logger.warning("⚠️ 交易所连接未就绪，Discord机器人仍将启动")
+        
+        # 验证交易所连接
+        if bot.bot_data.get('exchange'):
+            try:
+                await bot.bot_data['exchange'].fetch_time()
+                logger.info("✅ 交易所连接验证成功")
+            except Exception as e:
+                logger.error(f"❌ 交易所连接验证失败: {e}")
+                bot.bot_data['exchange'] = None
+        
+        await bot.start(CONFIG.discord_token)
+    except Exception as e:
+        logger.error(f"Discord机器人初始化失败: {e}")
+        raise
+
+async def stop_bot_services(bot):
+    """停止Discord机器人服务"""
+    try:
+        await bot.close()
+        logger.info("✅ Discord服务已停止")
+    except Exception as e:
+        logger.error(f"停止Discord服务失败: {e}")
+
 class TradingBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -25,6 +74,7 @@ class TradingBot(commands.Bot):
             )
         )
         self.initialized = False
+        self.bot_data = {}  # 添加这行
 
     async def setup_hook(self):
         """设置机器人启动时的钩子"""
@@ -271,12 +321,12 @@ class TradingPanel(commands.Cog):
 
 async def start_discord_bot():
     """启动Discord Bot的入口函数"""
-    bot = TradingBot()
+    bot = get_bot()
     try:
-        await bot.start(CONFIG.discord_token)
+        await initialize_bot(bot)
     except Exception as e:
         logger.error(f"Discord Bot 启动失败: {e}")
         raise
 
 # 添加导出声明
-__all__ = ['start_radar']
+__all__ = ['get_bot', 'initialize_bot', 'stop_bot_services', 'start_discord_bot']
