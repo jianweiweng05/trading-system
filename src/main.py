@@ -1,5 +1,5 @@
-import asyncio
 import logging
+import asyncio
 import time
 import hmac
 import hashlib
@@ -43,30 +43,6 @@ def rate_limit_check(client_ip: str) -> bool:
         return False
     REQUEST_LOG[client_ip].append(now)
     return True
-
-# --- 状态变更回调函数 ---
-async def state_change_callback(old_state: str, new_state: str, application):
-    """系统状态变更回调函数"""
-    logger.info(f"状态变更回调: {old_state} -> {new_state}")
-    
-    if new_state == "EMERGENCY":
-        logger.critical("⚠️ 系统进入紧急状态，执行紧急处理")
-        # 可以在这里添加紧急处理逻辑
-        if application and hasattr(application, 'bot_data') and 'exchange' in application.bot_data:
-            try:
-                # 尝试平掉所有持仓
-                exchange = application.bot_data['exchange']
-                positions = await exchange.fetch_positions()
-                for position in positions:
-                    if float(position['contracts']) != 0:
-                        logger.warning(f"紧急平仓: {position['symbol']} {position['contracts']}")
-                        # 这里添加平仓逻辑
-            except Exception as e:
-                logger.error(f"紧急平仓失败: {e}")
-    
-    elif new_state == "ERROR":
-        logger.error("系统发生错误，需要人工干预")
-        # 可以在这里添加错误处理逻辑
 
 # --- Discord Bot 启动函数 ---
 async def start_discord_bot():
@@ -150,20 +126,24 @@ async def lifespan(app: FastAPI):
         
         app.state.exchange = exchange
         
-        # 3. 设置状态变更回调
-        from src.system_state import SystemState
-        SystemState.set_alert_callback(state_change_callback)
-        
-        # 4. 启动 Discord Bot（作为后台任务）
+        # 3. 启动 Discord Bot（作为后台任务）
         discord_bot_task = asyncio.create_task(start_discord_bot())
         logger.info("✅ Discord Bot 启动任务已创建")
         
-        # 5. 启动黑天鹅雷达（作为后台任务）
-        from src.black_swan_radar import start_radar
-        radar_task = asyncio.create_task(start_radar())
-        logger.info("✅ 黑天鹅雷达启动任务已创建")
+        # 4. 启动黑天鹅雷达（作为后台任务） - 添加错误处理
+        try:
+            from src.black_swan_radar import start_radar
+            radar_task = asyncio.create_task(start_radar())
+            logger.info("✅ 黑天鹅雷达启动任务已创建")
+        except ImportError as e:
+            logger.error(f"黑天鹅雷达模块导入失败: {e}")
+            # 不影响系统启动，只记录错误
+        except Exception as e:
+            logger.error(f"黑天鹅雷达启动失败: {e}")
+            # 不影响系统启动，只记录错误
         
-        # 6. 设置系统状态
+        # 5. 设置系统状态
+        from src.system_state import SystemState
         await SystemState.set_state("ACTIVE", discord_bot)
         logger.info("🚀 系统启动完成 (状态: ACTIVE)")
         
