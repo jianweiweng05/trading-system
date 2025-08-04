@@ -1,17 +1,14 @@
-import logging
-from typing import ClassVar, Final
-from src.database import get_setting  # 修改导入路径
-
-logger = logging.getLogger(__name__)
-
-class StrategyConfig:
-    """策略配置类"""
-    leverage: ClassVar[int] = 3
-    MACRO_COEFF: Final[float] = 1.0
-    
-    async def load_from_db(self):
-        try:
-            self.leverage = int(await get_setting('leverage', str(self.leverage)))
-            logger.info(f"策略配置已更新: leverage={self.leverage}")
-        except Exception as e:
-            logger.error(f"加载策略配置失败: {e}")
+fastapi==0.110.0
+uvicorn[standard]==0.29.0
+ccxt==4.3.30
+aiosqlite==0.19.0
+pandas==1.5.3
+numpy==1.24.4
+pandas-ta==0.3.14b0
+sqlalchemy==1.4.46
+pydantic>=2.3.0,<3.0.0
+pydantic-settings>=2.2.1
+discord.py==2.3.2
+PyNaCl==1.5.0
+feedparser==6.0.10
+httpx==0.27.0
