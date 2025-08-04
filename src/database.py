@@ -1,6 +1,7 @@
 import logging
 import os
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy import (
     Table, Column, Integer, String, Float, DateTime, MetaData, insert, select, update, func, Text
 )
