@@ -82,12 +82,9 @@ async def lifespan(app: FastAPI):
             'config': CONFIG
         }
         
-        # 注册 Discord 命令
-        from src.discord_bot import status
-        discord_bot.add_command(status)
-        logger.info("✅ Discord 命令已注册")
-        
-        asyncio.create_task(discord_bot.start(CONFIG.discord_token))
+        # 注册 Discord Bot
+        from src.discord_bot import initialize_bot
+        await initialize_bot(app)
         logger.info("✅ Discord Bot 已启动")
         
         # 4. 设置系统状态
@@ -103,7 +100,8 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("🛑 系统关闭中...")
         if discord_bot.is_ready():
-            await discord_bot.close()
+            from src.discord_bot import stop_bot_services
+            await stop_bot_services(app)
             logger.info("✅ Discord 服务已停止")
         if exchange:
             try:
