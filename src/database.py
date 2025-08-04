@@ -1,9 +1,15 @@
 import logging
 import os
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from typing import Optional, List, AsyncGenerator
+from datetime import datetime
+from functools import wraps
+
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import (
-    Table, Column, Integer, String, Float, DateTime, MetaData, insert, select, update, func, Text
+    Table, Column, Integer, String, Float, DateTime, MetaData, insert, select, update, func, Text, text
 )
 
 logger = logging.getLogger(__name__)
@@ -28,12 +34,46 @@ def get_db_paths():
     
     return os.path.join(base_path, "trading_system_v7.db")
 
-# 修复了函数名错误
-DATABASE_URL = f"sqlite+aiosqlite:///{get_db_paths()}"  # 使用正确的函数名
+# 添加数据库连接池配置
+def create_engine_with_pool(database_url: str) -> AsyncEngine:
+    """创建带连接池的引擎"""
+    return create_async_engine(
+        database_url,
+        echo=False,
+        pool_size=5,
+        max_overflow=10,
+        pool_timeout=30,
+        pool_recycle=3600
+    )
+
+DATABASE_URL = f"sqlite+aiosqlite:///{get_db_paths()}"
 logger.info(f"数据库路径: {DATABASE_URL}")
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+engine = create_engine_with_pool(DATABASE_URL)
 metadata = MetaData()
+
+# 添加数据模型
+Base = declarative_base()
+
+class Trade(Base):
+    __tablename__ = 'trades'
+    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    symbol: Mapped[str] = mapped_column(nullable=False, index=True)
+    quantity: Mapped[float] = mapped_column(nullable=False)
+    entry_price: Mapped[float] = mapped_column(nullable=False)
+    exit_price: Mapped[Optional[float]]
+    trade_type: Mapped[str] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(nullable=False, default='OPEN', index=True)
+    strategy_id: Mapped[str]
+    created_at: Mapped[datetime] = mapped_column(default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
+
+class Setting(Base):
+    __tablename__ = 'settings'
+    
+    key: Mapped[str] = mapped_column(primary_key=True)
+    value: Mapped[str]
 
 trades = Table(
     'trades', metadata,
@@ -55,6 +95,42 @@ settings = Table(
     Column('value', Text)
 )
 
+# 添加事务装饰器
+def with_transaction(func):
+    """事务装饰器"""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        async with db_pool.get_session() as session:
+            try:
+                result = await func(session, *args, **kwargs)
+                await session.commit()
+                return result
+            except Exception:
+                await session.rollback()
+                raise
+    return wrapper
+
+# 优化数据库连接池
+class DatabaseConnectionPool:
+    def __init__(self, engine: AsyncEngine):
+        self.engine = engine
+        self.session_factory = sessionmaker(
+            engine,
+            class_=AsyncSession,
+            expire_on_commit=False
+        )
+    
+    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
+        """获取数据库会话"""
+        async with self.session_factory() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+            finally:
+                await session.close()
+
 async def init_db():
     """初始化数据库"""
     try:
@@ -66,20 +142,32 @@ async def init_db():
         logger.error(f"❌ 数据库初始化失败: {str(e)}", exc_info=True)
         raise
 
-async def get_setting(key: str, default_value: str = None) -> str:
-    """获取设置项"""
+# 添加数据库健康检查
+async def check_database_health() -> bool:
+    """检查数据库连接状态"""
     try:
         async with engine.connect() as conn:
-            stmt = select(settings.c.value).where(settings.c.key == key)
-            result = await conn.execute(stmt)
-            value = result.scalar_one_or_none()
+            await conn.execute(text("SELECT 1"))
+            return True
+    except Exception as e:
+        logger.error(f"数据库健康检查失败: {str(e)}")
+        return False
+
+async def get_setting(key: str, default_value: str = None) -> Optional[str]:
+    """获取设置项"""
+    try:
+        async with db_pool.get_session() as session:
+            result = await session.execute(
+                select(Setting).where(Setting.key == key)
+            )
+            setting = result.scalar_one_or_none()
             
-            if value is None and default_value is not None:
+            if setting is None and default_value is not None:
                 logger.info(f"设置项 '{key}' 不存在，使用默认值 '{default_value}'")
                 await set_setting(key, default_value)
                 return default_value
                 
-            return value
+            return setting.value if setting else None
     except Exception as e:
         logger.warning(f"获取配置项 '{key}' 失败: {str(e)}，返回默认值")
         return default_value
@@ -104,15 +192,16 @@ async def set_setting(key: str, value: str):
         logger.error(f"设置配置项 '{key}' 失败: {str(e)}")
         raise
 
-async def get_open_positions():
+@with_transaction
+async def get_open_positions(session: AsyncSession) -> List[Trade]:
     """获取所有未平仓仓位"""
     try:
-        async with engine.connect() as conn:
-            stmt = select(trades).where(trades.c.status == 'OPEN')
-            result = await conn.execute(stmt)
-            positions = result.fetchall()
-            logger.info(f"获取到 {len(positions)} 个未平仓位")
-            return positions
+        result = await session.execute(
+            select(Trade).where(Trade.status == 'OPEN')
+        )
+        positions = result.scalars().all()
+        logger.info(f"获取到 {len(positions)} 个未平仓位")
+        return positions
     except Exception as e:
         logger.error(f"获取持仓失败: {str(e)}")
         return []
@@ -198,30 +287,10 @@ async def get_position_by_symbol(symbol: str):
         logger.error(f"获取持仓失败: {str(e)}")
         return None
 
-# 添加数据库会话管理器
 async def get_db_connection():
     """获取数据库连接的上下文管理器"""
     async with engine.connect() as conn:
         yield conn
 
-# 数据库连接池
-class DatabaseConnectionPool:
-    def __init__(self):
-        self.engine = engine
-        
-    async def execute_query(self, query, params=None):
-        """执行查询"""
-        try:
-            async with self.engine.connect() as conn:
-                if params:
-                    result = await conn.execute(query, params)
-                else:
-                    result = await conn.execute(query)
-                await conn.commit()
-                return result
-        except Exception as e:
-            logger.error(f"数据库查询失败: {str(e)}")
-            raise
-
 # 创建全局连接池实例
-db_pool = DatabaseConnectionPool()
+db_pool = DatabaseConnectionPool(engine)
