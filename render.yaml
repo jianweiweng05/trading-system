@@ -4,32 +4,22 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     
-    # 预启动命令
+    # 新增的预启动命令
     preStartCommand: |
       mkdir -p /var/data
       chmod 777 /var/data
       echo "✅ 数据库目录权限已设置"
     
-    # 健康检查配置
     healthCheck:
       path: /health
-      initialDelaySeconds: 180  # Docker环境需要更长时间
-      timeoutSeconds: 30
-      intervalSeconds: 30
-      gracePeriodSeconds: 60  # 添加优雅期
-    # 环境变量
+      initialDelaySeconds: 120
+      
     envVars:
       - key: PORT
         value: 8000
       - key: RENDER
-        value: "true"
-      - key: PYTHON_VERSION
-        value: 3.10.0
-      - key: PYTHONUNBUFFERED
-        value: "1"  # 确保Python日志实时输出
-      # 添加数据库相关环境变量
-      - key: DATABASE_URL
-        value: sqlite:////var/data/trading_state_v5.db
-      # 添加资源限制相关配置
-      - key: MAX_WORKERS
-        value: "1"  # Docker环境下限制工作进程数
+        value: "true"  # 标记Render环境
+      - key: EXCHANGE_MAX_RETRIES
+        value: "3"
+      - key: EXCHANGE_RETRY_DELAY
+        value: "5"
