@@ -1,10 +1,9 @@
 import logging
 import os
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy import (
     Table, Column, Integer, String, Float, DateTime, MetaData, insert, select, update, func, Text
 )
-from sqlalchemy.ext.asyncio import async_sessionmaker
 
 logger = logging.getLogger(__name__)
 
@@ -201,16 +200,8 @@ async def get_position_by_symbol(symbol: str):
 # 添加数据库会话管理器
 async def get_db_connection():
     """获取数据库连接的上下文管理器"""
-    async_session = async_sessionmaker(
-        engine,
-        class_=AsyncSession,
-        expire_on_commit=False
-    )
-    async with async_session() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+    async with engine.connect() as conn:
+        yield conn
 
 # 数据库连接池
 class DatabaseConnectionPool:
