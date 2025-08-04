@@ -10,8 +10,7 @@ from fastapi.responses import JSONResponse
 from ccxt.async_support import binance
 import discord
 from discord.ext import commands
-from pydantic import Field
-from pydantic_settings import BaseSettings
+import uvicorn
 
 # --- 导入配置 ---
 from src.config import CONFIG
@@ -31,11 +30,13 @@ discord_bot = commands.Bot(command_prefix="!", intents=intents)
 @discord_bot.event
 async def on_ready():
     channel = discord_bot.get_channel(int(CONFIG.discord_channel_id))
-    await channel.send("✅ 交易系统连接成功")
+    if channel:
+        await channel.send("✅ 交易系统连接成功")
     logger.info(f"Discord Bot 已登录: {discord_bot.user}")
 
 # --- 全局变量 ---
 REQUEST_LOG = {}
+discord_bot_task = None  # 用于存储Discord机器人任务
 
 # --- 辅助函数 ---
 def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
@@ -54,9 +55,20 @@ def rate_limit_check(client_ip: str) -> bool:
     REQUEST_LOG[client_ip].append(now)
     return True
 
+# --- Discord Bot 启动函数 ---
+async def start_discord_bot():
+    """启动Discord机器人的异步函数"""
+    try:
+        from src.discord_bot import initialize_bot
+        await initialize_bot(discord_bot)
+    except Exception as e:
+        logger.error(f"Discord机器人启动失败: {e}")
+        raise
+
 # --- 生命周期管理 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global discord_bot_task
     exchange = None
     try:
         logger.info("🔄 系统启动中...")
@@ -82,10 +94,9 @@ async def lifespan(app: FastAPI):
             'config': CONFIG
         }
         
-        # 注册 Discord Bot
-        from src.discord_bot import initialize_bot
-        await initialize_bot(app)
-        logger.info("✅ Discord Bot 已启动")
+        # 创建后台任务启动Discord机器人
+        discord_bot_task = asyncio.create_task(start_discord_bot())
+        logger.info("✅ Discord Bot 启动任务已创建")
         
         # 4. 设置系统状态
         from src.system_state import SystemState
@@ -99,9 +110,17 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         logger.info("🛑 系统关闭中...")
+        # 取消Discord机器人任务
+        if discord_bot_task and not discord_bot_task.done():
+            discord_bot_task.cancel()
+            try:
+                await discord_bot_task
+            except asyncio.CancelledError:
+                logger.info("✅ Discord Bot 任务已取消")
+        
         if discord_bot.is_ready():
             from src.discord_bot import stop_bot_services
-            await stop_bot_services(app)
+            await stop_bot_services(discord_bot)
             logger.info("✅ Discord 服务已停止")
         if exchange:
             try:
@@ -130,7 +149,14 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    # 检查Discord机器人状态
+    discord_status = "online" if discord_bot.is_ready() else "offline"
+    
+    return {
+        "status": "ok",
+        "discord_status": discord_status,
+        "timestamp": time.time()
+    }
 
 @app.get("/startup-check")
 async def startup_check():
@@ -181,18 +207,22 @@ async def tradingview_webhook(request: Request):
     try:
         signal_data = await request.json()
         logger.info(f"收到交易信号: {signal_data}")
+        
+        # 这里可以添加处理交易信号的逻辑
+        # 例如：调用交易函数执行下单操作
+        
         return {"status": "processed"}
     except Exception as e:
         logger.error(f"信号处理失败: {e}")
         raise HTTPException(400, detail="无效的JSON数据")
 
-# --- 导出 ---
-__all__ = ['app']
-
+# --- 主函数 ---
 if __name__ == "__main__":
-    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    logger.info(f"启动服务器，端口: {port}")
     uvicorn.run(
         "src.main:app",
         host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000))
+        port=port,
+        log_level="info"
     )
