@@ -8,8 +8,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from ccxt.async_support import binance
-import discord
-from discord.ext import commands
 import uvicorn
 
 # --- 导入配置 ---
@@ -22,21 +20,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- Discord Bot ---
-intents = discord.Intents.default()
-intents.message_content = True
-discord_bot = commands.Bot(command_prefix="!", intents=intents)
-
-@discord_bot.event
-async def on_ready():
-    channel = discord_bot.get_channel(int(CONFIG.discord_channel_id))
-    if channel:
-        await channel.send("✅ 交易系统连接成功")
-    logger.info(f"Discord Bot 已登录: {discord_bot.user}")
-
 # --- 全局变量 ---
 REQUEST_LOG = {}
 discord_bot_task = None  # 用于存储Discord机器人任务
+discord_bot = None  # 用于存储Discord机器人实例
 
 # --- 辅助函数 ---
 def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
@@ -58,9 +45,17 @@ def rate_limit_check(client_ip: str) -> bool:
 # --- Discord Bot 启动函数 ---
 async def start_discord_bot():
     """启动Discord机器人的异步函数"""
+    global discord_bot
     try:
-        from src.discord_bot import initialize_bot
+        from src.discord_bot import get_bot, initialize_bot
+        
+        # 获取Discord机器人实例
+        discord_bot = get_bot()
+        
+        # 初始化机器人
         await initialize_bot(discord_bot)
+        
+        return discord_bot
     except Exception as e:
         logger.error(f"Discord机器人启动失败: {e}")
         raise
@@ -68,7 +63,7 @@ async def start_discord_bot():
 # --- 生命周期管理 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global discord_bot_task
+    global discord_bot_task, discord_bot
     exchange = None
     try:
         logger.info("🔄 系统启动中...")
@@ -89,13 +84,20 @@ async def lifespan(app: FastAPI):
         logger.info("✅ 交易所连接已建立")
         
         # 3. 启动 Discord Bot
+        # 创建后台任务启动Discord机器人
+        discord_bot_task = asyncio.create_task(start_discord_bot())
+        # 等待Discord机器人启动完成
+        discord_bot = await discord_bot_task
+        
+        # 设置机器人数据
         discord_bot.bot_data = {
             'exchange': exchange,
             'config': CONFIG
         }
         
-        # 创建后台任务启动Discord机器人
-        discord_bot_task = asyncio.create_task(start_discord_bot())
+        # 将机器人实例存储在app.state中
+        app.state.discord_bot = discord_bot
+        
         logger.info("✅ Discord Bot 启动任务已创建")
         
         # 4. 设置系统状态
@@ -118,7 +120,7 @@ async def lifespan(app: FastAPI):
             except asyncio.CancelledError:
                 logger.info("✅ Discord Bot 任务已取消")
         
-        if discord_bot.is_ready():
+        if discord_bot and discord_bot.is_ready():
             from src.discord_bot import stop_bot_services
             await stop_bot_services(discord_bot)
             logger.info("✅ Discord 服务已停止")
@@ -150,7 +152,9 @@ async def root():
 @app.get("/health")
 async def health_check():
     # 检查Discord机器人状态
-    discord_status = "online" if discord_bot.is_ready() else "offline"
+    discord_status = "offline"
+    if discord_bot and discord_bot.is_ready():
+        discord_status = "online"
     
     return {
         "status": "ok",
@@ -164,7 +168,7 @@ async def startup_check():
         "config_loaded": hasattr(CONFIG, 'discord_token'),
         "db_accessible": False,
         "exchange_ready": False,
-        "discord_ready": discord_bot.is_ready() if discord_bot else False
+        "discord_ready": False
     }
     
     try:
@@ -177,6 +181,8 @@ async def startup_check():
                 checks["exchange_ready"] = True
             except:
                 pass
+        if discord_bot and discord_bot.is_ready():
+            checks["discord_ready"] = True
     except Exception as e:
         logger.error(f"健康检查失败: {e}")
     
