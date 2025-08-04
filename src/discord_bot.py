@@ -76,26 +76,29 @@ class TradingCommands(commands.Cog, name="交易系统"):
         except Exception as e:
             logger.error(f"status 命令执行失败: {e}")
             await ctx.send("❌ 获取系统状态失败")
-    
-    # 移除了自定义的help命令，使用内置的help命令
 
 # ================= 生命周期管理 =================
-async def initialize_bot(app):
+async def initialize_bot(bot):
     """初始化 Discord Bot"""
-    # 移除默认的help命令
-    bot.remove_command('help')
-    
-    # 添加Cog
-    await bot.add_cog(TradingCommands(bot))
-    logger.info("✅ 交易系统命令Cog已添加")
-    
-    app.state.discord_bot = bot
-    logger.info("🚀 正在启动 Discord Bot")
-    await bot.start(CONFIG.discord_token)
+    try:
+        # 移除默认的help命令
+        bot.remove_command('help')
+        
+        # 添加Cog
+        await bot.add_cog(TradingCommands(bot))
+        logger.info("✅ 交易系统命令Cog已添加")
+        
+        logger.info("🚀 正在启动 Discord Bot")
+        
+        # 启动Discord机器人
+        await bot.start(CONFIG.discord_token)
+    except Exception as e:
+        logger.error(f"Discord机器人启动失败: {e}")
+        raise
 
-async def stop_bot_services(app):
+async def stop_bot_services(bot):
     """关闭 Discord Bot"""
-    if hasattr(app.state, 'discord_bot'):
+    if bot.is_ready():
         await bot.close()
         logger.info("🛑 Discord Bot 已关闭")
 
