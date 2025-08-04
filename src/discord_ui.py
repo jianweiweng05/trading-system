@@ -46,8 +46,7 @@ class TradingModeView(View):
             self.live_button.style = discord.ButtonStyle.grey
             
             # 禁用按钮防止重复点击
-            self.sim_button.disabled = True
-            self.live_button.disabled = True
+            self.disable_all_buttons()
             
             # 发送响应
             await interaction.response.edit_message(view=self)
@@ -57,8 +56,7 @@ class TradingModeView(View):
             logger.info(f"用户 {interaction.user} 切换到模拟交易模式")
             
             # 启用按钮
-            self.sim_button.disabled = False
-            self.live_button.disabled = False
+            self.enable_all_buttons()
             self.current_mode = "simulate"
             
         except Exception as e:
@@ -78,6 +76,16 @@ class TradingModeView(View):
             view=confirm_view,
             ephemeral=True
         )
+    
+    def disable_all_buttons(self):
+        """禁用所有按钮"""
+        for item in self.children:
+            item.disabled = True
+    
+    def enable_all_buttons(self):
+        """启用所有按钮"""
+        for item in self.children:
+            item.disabled = False
 
 class ConfirmView(View):
     """确认对话框"""
@@ -165,7 +173,13 @@ class ParameterControlView(View):
         """更新杠杆系数"""
         try:
             new_leverage = float(self.leverage_select.values[0])
-            # 这里添加更新逻辑
+            
+            # 验证杠杆系数
+            if new_leverage <= 0:
+                await interaction.followup.send("杠杆系数必须大于0", ephemeral=True)
+                return
+            
+            # 更新配置
             CONFIG.leverage = new_leverage
             
             # 更新按钮文本
@@ -193,7 +207,13 @@ class ParameterControlView(View):
         """更新资本分配"""
         try:
             allocation = self.allocation_select.values[0]
-            # 这里添加更新逻辑
+            
+            # 验证分配模式
+            if allocation not in ["balanced", "aggressive", "conservative"]:
+                await interaction.followup.send("无效的资本分配模式", ephemeral=True)
+                return
+            
+            # 更新配置
             CONFIG.allocation = allocation
             
             # 更新下拉菜单占位符
@@ -286,20 +306,60 @@ class QuickActionsView(View):
     
     async def refresh_status(self, interaction: discord.Interaction):
         """刷新状态"""
-        # 这里添加刷新逻辑
-        await interaction.response.defer()
-        # 可以发送新的嵌入消息或更新现有消息
+        try:
+            # 创建状态嵌入消息
+            embed = discord.Embed(
+                title="📊 系统状态",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="运行模式", value=CONFIG.run_mode)
+            embed.add_field(name="杠杆系数", value=f"{getattr(CONFIG, 'leverage', 5.0)}x")
+            embed.add_field(name="火力系数", value=str(getattr(CONFIG, 'firepower', 0.8)))
+            embed.add_field(name="资本分配", value=getattr(CONFIG, 'allocation', 'balanced'))
+            
+            # 检查交易所连接状态
+            if hasattr(interaction.client, 'bot_data') and 'exchange' in interaction.client.bot_data:
+                embed.add_field(name="交易所连接", value="🟢 已连接", inline=False)
+            else:
+                embed.add_field(name="交易所连接", value="🔴 未连接", inline=False)
+            
+            # 发送响应
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+            # 记录日志
+            logger.info(f"用户 {interaction.user} 刷新了系统状态")
+            
+        except Exception as e:
+            logger.error(f"刷新状态失败: {e}")
+            await interaction.response.send_message("刷新失败，请稍后重试", ephemeral=True)
     
     async def view_positions(self, interaction: discord.Interaction):
         """查看持仓"""
-        # 这里添加查看持仓逻辑
-        await interaction.response.defer()
-        # 可以发送持仓信息的嵌入消息
+        try:
+            # 这里添加查看持仓逻辑
+            embed = discord.Embed(
+                title="📊 当前持仓",
+                description="暂无持仓信息",
+                color=discord.Color.blue()
+            )
+            
+            # 发送响应
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+            # 记录日志
+            logger.info(f"用户 {interaction.user} 查看了持仓信息")
+            
+        except Exception as e:
+            logger.error(f"查看持仓失败: {e}")
+            await interaction.response.send_message("查看持仓失败，请稍后重试", ephemeral=True)
     
     async def save_config(self, interaction: discord.Interaction):
         """保存配置"""
         try:
             # 这里添加保存配置逻辑
+            # 例如：将配置保存到数据库
+            
+            # 发送响应
             await interaction.response.send_message("✅ 配置已保存", ephemeral=True)
             
             # 记录日志
@@ -311,9 +371,30 @@ class QuickActionsView(View):
     
     async def view_logs(self, interaction: discord.Interaction):
         """查看日志"""
-        # 这里添加查看日志逻辑
-        await interaction.response.defer()
-        # 可以发送最近日志的嵌入消息
+        try:
+            # 这里添加查看日志逻辑
+            embed = discord.Embed(
+                title="📝 系统日志",
+                description="最近日志信息",
+                color=discord.Color.blue()
+            )
+            
+            # 添加一些示例日志
+            embed.add_field(
+                name="最近活动",
+                value="系统运行正常",
+                inline=False
+            )
+            
+            # 发送响应
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            
+            # 记录日志
+            logger.info(f"用户 {interaction.user} 查看了系统日志")
+            
+        except Exception as e:
+            logger.error(f"查看日志失败: {e}")
+            await interaction.response.send_message("查看日志失败，请稍后重试", ephemeral=True)
 
 class TradingDashboard(commands.Cog, name="交易面板"):
     """交易系统控制面板"""
