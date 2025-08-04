@@ -104,7 +104,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
             )
             embed.add_field(name="运行模式", value=CONFIG.run_mode)
             embed.add_field(name="Bot状态", value="🟢 在线")
-            embed.add_field(name="延迟", value=f"{round(self.bot.latency * 1000)} ms}")
+            embed.add_field(name="延迟", value=f"{round(self.bot.latency * 1000)} ms")
             
             # 如果有交易所数据，添加到状态中
             if hasattr(self.bot, 'bot_data') and 'exchange' in self.bot.bot_data:
