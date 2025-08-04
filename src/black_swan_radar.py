@@ -30,7 +30,7 @@ def get_db_paths():
 
 RADAR_DB_FILE, MAIN_DB_FILE = get_db_paths()
 
-# --- 数据库功能 ---
+# --- 数据库模块 ---
 async def radar_db_query(query, params=(), commit=True):
     async with aiosqlite.connect(RADAR_DB_FILE) as db:
         try:
@@ -114,7 +114,7 @@ async def fetch_rss_feeds():
                     await asyncio.sleep(2 ** attempt)  # 指数退避
     return headlines
 
-# --- AI分析模块 (V2.0 Prompt) ---
+# --- AI分析模块 ---
 async def analyze_with_deepseek(headlines: list):
     if not headlines: 
         return None
