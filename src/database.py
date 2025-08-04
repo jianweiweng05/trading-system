@@ -38,11 +38,7 @@ def create_engine_with_pool(database_url: str) -> AsyncEngine:
     """创建带连接池的引擎"""
     return create_async_engine(
         database_url,
-        echo=False,
-        pool_size=5,
-        max_overflow=10,
-        pool_timeout=30,
-        pool_recycle=3600
+        echo=False
     )
 
 DATABASE_URL = f"sqlite+aiosqlite:///{get_db_paths()}"
