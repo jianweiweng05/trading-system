@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 REQUEST_LOG = {}
 discord_bot_task = None  # 用于存储Discord机器人任务
 discord_bot = None  # 用于存储Discord机器人实例
+radar_task = None  # 用于存储黑天鹅雷达任务
+startup_complete = False  # 标记系统是否完全启动
 
 # --- 辅助函数 ---
 def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
@@ -53,8 +55,8 @@ async def start_discord_bot():
         discord_bot = get_bot()
         
         # 等待交易所连接建立
-        max_retries = 10
-        retry_delay = 1  # 秒
+        max_retries = 20  # 增加重试次数
+        retry_delay = 2   # 增加重试间隔
         
         for i in range(max_retries):
             if hasattr(app.state, 'exchange') and app.state.exchange:
@@ -84,6 +86,10 @@ async def start_discord_bot():
         # 初始化机器人
         await initialize_bot(discord_bot)
         
+        # 标记启动完成
+        startup_complete = True
+        logger.info("🚀 系统启动完成")
+        
         return discord_bot
     except Exception as e:
         logger.error(f"Discord机器人启动失败: {e}")
@@ -92,7 +98,7 @@ async def start_discord_bot():
 # --- 生命周期管理 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global discord_bot_task, discord_bot
+    global discord_bot_task, discord_bot, radar_task, startup_complete
     exchange = None
     try:
         logger.info("🔄 系统启动中...")
@@ -124,7 +130,12 @@ async def lifespan(app: FastAPI):
         discord_bot_task = asyncio.create_task(start_discord_bot())
         logger.info("✅ Discord Bot 启动任务已创建")
         
-        # 4. 设置系统状态
+        # 4. 启动黑天鹅雷达（作为后台任务）
+        from src.black_swan_radar import start_radar
+        radar_task = asyncio.create_task(start_radar())
+        logger.info("✅ 黑天鹅雷达启动任务已创建")
+        
+        # 5. 设置系统状态
         from src.system_state import SystemState
         await SystemState.set_state("ACTIVE", discord_bot)
         logger.info("🚀 系统启动完成 (状态: ACTIVE)")
@@ -136,13 +147,15 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         logger.info("🛑 系统关闭中...")
-        # 取消Discord机器人任务
-        if discord_bot_task and not discord_bot_task.done():
-            discord_bot_task.cancel()
-            try:
-                await discord_bot_task
-            except asyncio.CancelledError:
-                logger.info("✅ Discord Bot 任务已取消")
+        # 取消所有后台任务
+        tasks = [discord_bot_task, radar_task]
+        for task in tasks:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    logger.info(f"✅ 任务已取消")
         
         if discord_bot and discord_bot.is_ready():
             from src.discord_bot import stop_bot_services
@@ -189,10 +202,16 @@ async def health_check():
         except:
             pass
     
+    # 检查黑天鹅雷达状态
+    radar_status = "offline"
+    if radar_task and not radar_task.done():
+        radar_status = "online"
+    
     return {
         "status": "ok",
         "discord_status": discord_status,
         "exchange_status": exchange_status,
+        "radar_status": radar_status,
         "timestamp": time.time()
     }
 
@@ -202,7 +221,8 @@ async def startup_check():
         "config_loaded": hasattr(CONFIG, 'discord_token'),
         "db_accessible": False,
         "exchange_ready": False,
-        "discord_ready": False
+        "discord_ready": False,
+        "radar_ready": False
     }
     
     try:
@@ -217,6 +237,8 @@ async def startup_check():
                 pass
         if discord_bot and discord_bot.is_ready():
             checks["discord_ready"] = True
+        if radar_task and not radar_task.done():
+            checks["radar_ready"] = True
     except Exception as e:
         logger.error(f"健康检查失败: {e}")
     
