@@ -51,18 +51,22 @@ ENV PATH=/home/trader/.local/bin:$PATH \
     PYTHONPATH=/app \
     PYTHONMALLOC=malloc \
     MALLOC_ARENA_MAX=2 \
-    PYTHONOPTIMIZE=1 \
-    PORT=8000
+    PYTHONOPTIMIZE=1
 
 # 切换到非root用户
 USER trader
 
-# 健康检查 - 增加启动等待时间和重试次数
+# 健康检查 - 使用shell形式以便环境变量替换
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT}/health || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # 暴露端口
-EXPOSE ${PORT}
+EXPOSE 8000
 
-# 启动命令 - 使用uvicorn运行FastAPI应用
-CMD ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "${PORT}", "--log-level", "info"]
+# 创建启动脚本
+RUN echo '#!/bin/sh\n\
+exec python -m uvicorn src.main:app --host 0.0.0.0 --port ${PORT:-8000} --log-level info' \
+> /app/start.sh && chmod +x /app/start.sh
+
+# 使用shell形式运行启动脚本，确保环境变量替换
+CMD ["/app/start.sh"]
