@@ -5,6 +5,7 @@ import logging
 import asyncio
 from datetime import datetime
 from typing import Optional
+import asyncpg
 
 from src.config import CONFIG
 from src.system_state import SystemState
@@ -15,6 +16,14 @@ logger = logging.getLogger("discord_bot")
 # 全局变量
 _bot_instance = None
 
+# 添加可选依赖处理
+try:
+    from src.black_swan_radar import start_radar
+    BLACK_SWAN_AVAILABLE = True
+except ImportError:
+    BLACK_SWAN_AVAILABLE = False
+    logger.warning("黑天鹅雷达模块不可用")
+
 def get_bot():
     """获取Discord机器人实例"""
     global _bot_instance
@@ -22,9 +31,30 @@ def get_bot():
         _bot_instance = TradingBot()
     return _bot_instance
 
+async def create_db_pool():
+    """创建数据库连接池"""
+    return await asyncpg.create_pool(
+        host=CONFIG.db_host,
+        port=CONFIG.db_port,
+        user=CONFIG.db_user,
+        password=CONFIG.db_password,
+        database=CONFIG.db_name,
+        min_size=5,
+        max_size=20
+    )
+
+def has_admin_permissions():
+    """权限检查装饰器"""
+    def predicate(interaction: discord.Interaction) -> bool:
+        return interaction.user.guild_permissions.administrator
+    return app_commands.check(predicate)
+
 async def initialize_bot(bot):
     """初始化Discord机器人"""
     try:
+        # 创建数据库连接池
+        bot.bot_data['db_pool'] = await create_db_pool()
+        
         # 等待交易所连接建立
         max_retries = 20
         retry_delay = 2
@@ -56,6 +86,9 @@ async def initialize_bot(bot):
 async def stop_bot_services(bot):
     """停止Discord机器人服务"""
     try:
+        # 关闭数据库连接池
+        if bot.bot_data.get('db_pool'):
+            await bot.bot_data['db_pool'].close()
         await bot.close()
         logger.info("✅ Discord服务已停止")
     except Exception as e:
@@ -74,7 +107,10 @@ class TradingBot(commands.Bot):
             )
         )
         self.initialized = False
-        self.bot_data = {}  # 添加这行
+        self.bot_data = {
+            'exchange': None,
+            'db_pool': None
+        }
 
     async def setup_hook(self):
         """设置机器人启动时的钩子"""
@@ -162,17 +198,27 @@ class TradingCommands(commands.Cog):
                 await interaction.response.send_message("❌停止交易系统失败", ephemeral=True)
 
     @app_commands.command(name="emergency_stop", description="紧急停止")
+    @has_admin_permissions()
     async def slash_emergency_stop(self, interaction: discord.Interaction):
         try:
+            user_name = interaction.user.name
+            user_id = interaction.user.id
+            logger.warning(f"用户 {user_name} (ID: {user_id}) 触发了紧急停止")
+            
             await SystemState.set_state("EMERGENCY")
+            
+            # 记录详细操作日志
+            logger.info(f"紧急停止操作完成 - 操作者: {user_name}, 时间: {datetime.now()}")
+            
             await interaction.response.send_message("⚠️ 已触发紧急停止", ephemeral=True)
-            logger.warning(f"⚠️ 用户 {interaction.user.name} 触发了紧急停止")
+            
         except Exception as e:
-            logger.error(f"紧急停止失败: {str(e)}", exc_info=True)
+            logger.error(f"紧急停止失败 - 操作者: {user_name}, 错误: {str(e)}", exc_info=True)
             if not interaction.response.is_done():
                 await interaction.response.send_message("❌紧急停止失败", ephemeral=True)
 
     @app_commands.command(name="set_risk", description="设置风险级别")
+    @has_admin_permissions()
     @app_commands.describe(level="风险级别 (LOW/MEDIUM/HIGH)")
     async def slash_set_risk(self, interaction: discord.Interaction, level: str):
         try:
