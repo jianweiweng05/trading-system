@@ -52,6 +52,26 @@ async def start_discord_bot():
         # 获取Discord机器人实例
         discord_bot = get_bot()
         
+        # 等待交易所连接建立
+        max_retries = 10
+        retry_delay = 1  # 秒
+        
+        for i in range(max_retries):
+            if hasattr(app.state, 'exchange') and app.state.exchange:
+                logger.info("✅ 交易所连接已就绪，启动Discord机器人")
+                break
+            if i < max_retries - 1:
+                logger.info(f"等待交易所连接建立... ({i + 1}/{max_retries})")
+                await asyncio.sleep(retry_delay)
+        else:
+            logger.warning("⚠️ 交易所连接未就绪，Discord机器人仍将启动")
+        
+        # 设置机器人数据
+        discord_bot.bot_data = {
+            'exchange': getattr(app.state, 'exchange', None),
+            'config': CONFIG
+        }
+        
         # 初始化机器人
         await initialize_bot(discord_bot)
         
@@ -80,8 +100,16 @@ async def lifespan(app: FastAPI):
             'enableRateLimit': True,
             'options': {'defaultType': 'future'}
         })
+        
+        # 测试交易所连接
+        try:
+            await exchange.load_markets()
+            logger.info("✅ 交易所连接已建立")
+        except Exception as e:
+            logger.error(f"❌ 交易所连接失败: {e}")
+            raise
+        
         app.state.exchange = exchange
-        logger.info("✅ 交易所连接已建立")
         
         # 3. 启动 Discord Bot（作为后台任务）
         discord_bot_task = asyncio.create_task(start_discord_bot())
@@ -143,9 +171,19 @@ async def health_check():
     if discord_bot and discord_bot.is_ready():
         discord_status = "online"
     
+    # 检查交易所状态
+    exchange_status = "offline"
+    if hasattr(app.state, 'exchange') and app.state.exchange:
+        try:
+            await app.state.exchange.fetch_time()
+            exchange_status = "online"
+        except:
+            pass
+    
     return {
         "status": "ok",
         "discord_status": discord_status,
+        "exchange_status": exchange_status,
         "timestamp": time.time()
     }
 
