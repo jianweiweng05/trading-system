@@ -68,6 +68,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
     
     def __init__(self, bot):
         self.bot = bot
+        self.bot.bot_data = {}  # 添加这行
     
     async def check_exchange_status(self):
         """检查交易所连接状态"""
@@ -154,6 +155,29 @@ class TradingCommands(commands.Cog, name="交易系统"):
 async def initialize_bot(bot):
     """初始化 Discord Bot"""
     try:
+        # 等待交易所连接建立
+        max_retries = 20
+        retry_delay = 2
+        
+        for i in range(max_retries):
+            if hasattr(bot, 'bot_data') and bot.bot_data.get('exchange'):
+                logger.info("✅ 交易所连接已就绪，启动Discord机器人")
+                break
+            if i < max_retries - 1:
+                logger.info(f"等待交易所连接建立... ({i + 1}/{max_retries})")
+                await asyncio.sleep(retry_delay)
+        else:
+            logger.warning("⚠️ 交易所连接未就绪，Discord机器人仍将启动")
+        
+        # 验证交易所连接
+        if bot.bot_data.get('exchange'):
+            try:
+                await bot.bot_data['exchange'].fetch_time()
+                logger.info("✅ 交易所连接验证成功")
+            except Exception as e:
+                logger.error(f"❌ 交易所连接验证失败: {e}")
+                bot.bot_data['exchange'] = None
+        
         # 移除默认的help命令
         bot.remove_command('help')
         
@@ -180,5 +204,14 @@ async def stop_bot_services(bot):
         await bot.close()
         logger.info("🛑 Discord Bot 已关闭")
 
+async def start_discord_bot():
+    """启动Discord Bot的入口函数"""
+    bot = get_bot()
+    try:
+        await initialize_bot(bot)
+    except Exception as e:
+        logger.error(f"Discord Bot 启动失败: {e}")
+        raise
+
 # ================= 导出配置 =================
-__all__ = ['get_bot', 'initialize_bot', 'stop_bot_services']
+__all__ = ['get_bot', 'initialize_bot', 'stop_bot_services', 'start_discord_bot']
