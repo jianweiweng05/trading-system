@@ -111,12 +111,28 @@ async def lifespan(app: FastAPI):
             'apiKey': CONFIG.binance_api_key,
             'secret': CONFIG.binance_api_secret,
             'enableRateLimit': True,
-            'options': {'defaultType': 'future'}
+            'options': {
+                'defaultType': 'future',
+                'adjustForTimeDifference': True
+            }
         })
-        exchange_task = asyncio.create_task(exchange.load_markets())
         
-        # 等待数据库和交易所初始化完成
-        await asyncio.gather(db_task, exchange_task)
+        # 添加重试机制
+        max_retries = int(os.getenv("EXCHANGE_MAX_RETRIES", "3"))
+        for i in range(max_retries):
+            try:
+                await asyncio.sleep(int(os.getenv("EXCHANGE_RETRY_DELAY", "5")) * i)  # 递增延迟
+                await exchange.load_markets()
+                logger.info("✅ 交易所连接已建立")
+                break
+            except Exception as e:
+                if i == max_retries - 1:
+                    logger.error(f"❌ 交易所连接失败: {e}")
+                    raise
+                logger.warning(f"交易所连接重试 {i + 1}/{max_retries}")
+        
+        # 等待数据库初始化完成
+        await db_task
         logger.info("✅ 数据库和交易所初始化完成")
         
         app.state.exchange = exchange
