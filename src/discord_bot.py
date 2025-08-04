@@ -57,7 +57,8 @@ def get_bot():
         @_bot_instance.event
         async def on_command_error(ctx, error):
             logger.error(f"❌ 命令 {ctx.command} 出错: {error}")
-            await ctx.send(f"⚠️ 命令执行失败: {str(error)}")
+            if not ctx.response.is_done():
+                await ctx.send(f"⚠️ 命令执行失败: {str(error)}", ephemeral=True)
     
     return _bot_instance
 
@@ -117,7 +118,8 @@ class TradingCommands(commands.Cog, name="交易系统"):
             logger.info(f"✅ 用户 {ctx.author} 查看了系统状态")
         except Exception as e:
             logger.error(f"status 命令执行失败: {e}")
-            await ctx.send("❌ 获取系统状态失败")
+            if not ctx.response.is_done():
+                await ctx.send("❌ 获取系统状态失败", ephemeral=True)
     
     # 新版 Slash 命令（/status）
     @app_commands.command(name="status", description="查看系统状态")
@@ -141,9 +143,12 @@ class TradingCommands(commands.Cog, name="交易系统"):
             
             await interaction.response.send_message(embed=embed)
             logger.info(f"✅ 用户 {interaction.user} 查看了系统状态")
+        except discord.errors.InteractionResponded:
+            logger.error("交互已响应，无法再次发送响应")
         except Exception as e:
             logger.error(f"slash status 命令执行失败: {e}")
-            await interaction.response.send_message("❌ 获取系统状态失败", ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message("❌ 获取系统状态失败", ephemeral=True)
 
 # ================= 生命周期管理 =================
 async def initialize_bot(bot):
