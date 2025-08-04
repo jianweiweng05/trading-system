@@ -77,44 +77,14 @@ class TradingCommands(commands.Cog, name="交易系统"):
             logger.error(f"status 命令执行失败: {e}")
             await ctx.send("❌ 获取系统状态失败")
     
-    @commands.command(name="help", help="显示帮助信息")
-    async def help(self, ctx, command_name=None):
-        """显示可用命令的帮助信息"""
-        if command_name:
-            # 显示特定命令的帮助
-            command = self.bot.get_command(command_name)
-            if command:
-                embed = discord.Embed(
-                    title=f"命令: {CONFIG.discord_prefix}{command.name}",
-                    description=command.help or "无描述",
-                    color=discord.Color.blue()
-                )
-                await ctx.send(embed=embed)
-            else:
-                await ctx.send(f"找不到命令: {command_name}")
-        else:
-            # 显示所有命令的帮助
-            embed = discord.Embed(
-                title="交易系统帮助",
-                description=f"以下是可用的命令 (前缀: {CONFIG.discord_prefix}):",
-                color=discord.Color.blue()
-            )
-            
-            # 按分类添加命令
-            for cog_name, cog in self.bot.cogs.items():
-                commands_list = []
-                for command in cog.get_commands():
-                    if not command.hidden:
-                        commands_list.append(f"**{CONFIG.discord_prefix}{command.name}** - {command.help or '无描述'}")
-                
-                if commands_list:
-                    embed.add_field(name=cog_name, value="\n".join(commands_list), inline=False)
-            
-            await ctx.send(embed=embed)
+    # 移除了自定义的help命令，使用内置的help命令
 
 # ================= 生命周期管理 =================
 async def initialize_bot(app):
     """初始化 Discord Bot"""
+    # 移除默认的help命令
+    bot.remove_command('help')
+    
     # 添加Cog
     await bot.add_cog(TradingCommands(bot))
     logger.info("✅ 交易系统命令Cog已添加")
