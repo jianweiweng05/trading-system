@@ -103,55 +103,55 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("🔄 系统启动中...")
         
-        # 1. 初始化数据库
+        # 1. 并行初始化数据库和交易所连接
         from src.database import init_db
-        await init_db()
-        logger.info("✅ 数据库初始化完成")
+        db_task = asyncio.create_task(init_db())
         
-        # 2. 初始化交易所连接
         exchange = binance({
             'apiKey': CONFIG.binance_api_key,
             'secret': CONFIG.binance_api_secret,
             'enableRateLimit': True,
             'options': {'defaultType': 'future'}
         })
+        exchange_task = asyncio.create_task(exchange.load_markets())
         
-        # 测试交易所连接
-        try:
-            await exchange.load_markets()
-            logger.info("✅ 交易所连接已建立")
-        except Exception as e:
-            logger.error(f"❌ 交易所连接失败: {e}")
-            raise
+        # 等待数据库和交易所初始化完成
+        await asyncio.gather(db_task, exchange_task)
+        logger.info("✅ 数据库和交易所初始化完成")
         
         app.state.exchange = exchange
         
-        # 3. 启动 Discord Bot（作为后台任务）
-        discord_bot_task = asyncio.create_task(start_discord_bot())
+        # 2. 并行启动 Discord Bot 和黑天鹅雷达
+        from src.discord_bot import get_bot, initialize_bot
+        discord_bot = get_bot()
+        discord_bot.bot_data = {
+            'exchange': exchange,
+            'config': CONFIG
+        }
+        
+        # 创建启动任务但不等待
+        discord_bot_task = asyncio.create_task(initialize_bot(discord_bot))
         logger.info("✅ Discord Bot 启动任务已创建")
         
-        # 4. 启动黑天鹅雷达（作为后台任务） - 添加错误处理
         try:
             from src.black_swan_radar import start_radar
             radar_task = asyncio.create_task(start_radar())
             logger.info("✅ 黑天鹅雷达启动任务已创建")
         except ImportError as e:
             logger.error(f"黑天鹅雷达模块导入失败: {e}")
-            # 不影响系统启动，只记录错误
         except Exception as e:
             logger.error(f"黑天鹅雷达启动失败: {e}")
-            # 不影响系统启动，只记录错误
         
-        # 5. 设置系统状态
+        # 3. 立即设置系统状态，不等待其他任务
         from src.system_state import SystemState
         await SystemState.set_state("ACTIVE", discord_bot)
+        startup_complete = True
         logger.info("🚀 系统启动完成 (状态: ACTIVE)")
         
         yield
         
     except Exception as e:
         logger.critical(f"启动失败: {e}", exc_info=True)
-        # 尝试设置错误状态
         try:
             await SystemState.set_state("ERROR")
         except:
@@ -159,13 +159,11 @@ async def lifespan(app: FastAPI):
         raise
     finally:
         logger.info("🛑 系统关闭中...")
-        # 设置关闭状态
         try:
             await SystemState.set_state("SHUTDOWN")
         except:
             pass
         
-        # 取消所有后台任务
         tasks = [discord_bot_task, radar_task]
         for task in tasks:
             if task and not task.done():
@@ -206,35 +204,8 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    # 获取系统状态信息
-    from src.system_state import SystemState
-    state_info = await SystemState.get_state_info()
-    
-    # 检查Discord机器人状态
-    discord_status = "offline"
-    if discord_bot and discord_bot.is_ready():
-        discord_status = "online"
-    
-    # 检查交易所状态
-    exchange_status = "offline"
-    if hasattr(app.state, 'exchange') and app.state.exchange:
-        try:
-            await app.state.exchange.fetch_time()
-            exchange_status = "online"
-        except:
-            pass
-    
-    # 检查黑天鹅雷达状态
-    radar_status = "offline"
-    if radar_task and not radar_task.done():
-        radar_status = "online"
-    
     return {
         "status": "ok",
-        "system_state": state_info,
-        "discord_status": discord_status,
-        "exchange_status": exchange_status,
-        "radar_status": radar_status,
         "timestamp": time.time()
     }
 
