@@ -95,6 +95,75 @@ async def start_discord_bot():
         logger.error(f"Discord机器人启动失败: {e}")
         raise
 
+# --- 安全启动任务包装函数 ---
+async def safe_start_task(task_func, name: str):
+    """安全启动任务的包装函数"""
+    try:
+        task = asyncio.create_task(task_func())
+        logger.info(f"✅ {name}启动任务已创建")
+        return task
+    except ImportError as e:
+        logger.error(f"{name}模块导入失败: {e}")
+        return None
+    except Exception as e:
+        logger.error(f"{name}启动失败: {e}")
+        return None
+
+# --- 系统状态检查函数 ---
+async def check_system_status() -> dict:
+    """检查系统整体状态"""
+    status = {
+        "state": "unknown",
+        "components": {},
+        "last_update": time.time()
+    }
+    
+    try:
+        from src.system_state import SystemState
+        current_state = await SystemState.get_state()
+        status["state"] = current_state
+        status["components"]["system_state"] = True
+    except:
+        status["components"]["system_state"] = False
+    
+    return status
+
+# --- 优雅关闭处理函数 ---
+async def graceful_shutdown():
+    """优雅关闭所有服务"""
+    logger.info("开始优雅关闭...")
+    
+    # 取消所有任务
+    tasks = [discord_bot_task, radar_task]
+    for task in tasks:
+        if task and not task.done():
+            task.cancel()
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"任务关闭超时")
+            except asyncio.CancelledError:
+                logger.info(f"任务已取消")
+    
+    # 关闭Discord Bot
+    if discord_bot and discord_bot.is_ready():
+        try:
+            from src.discord_bot import stop_bot_services
+            await asyncio.wait_for(stop_bot_services(discord_bot), timeout=5.0)
+            logger.info("✅ Discord 服务已停止")
+        except asyncio.TimeoutError:
+            logger.warning("Discord服务关闭超时")
+    
+    # 关闭交易所连接
+    if hasattr(app.state, 'exchange'):
+        try:
+            await asyncio.wait_for(app.state.exchange.close(), timeout=5.0)
+            logger.info("✅ 交易所连接已关闭")
+        except asyncio.TimeoutError:
+            logger.warning("交易所连接关闭超时")
+    
+    logger.info("✅ 系统安全关闭")
+
 # --- 生命周期管理 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -149,14 +218,11 @@ async def lifespan(app: FastAPI):
         discord_bot_task = asyncio.create_task(initialize_bot(discord_bot))
         logger.info("✅ Discord Bot 启动任务已创建")
         
-        try:
-            from src.black_swan_radar import start_radar
-            radar_task = asyncio.create_task(start_radar())
-            logger.info("✅ 黑天鹅雷达启动任务已创建")
-        except ImportError as e:
-            logger.error(f"黑天鹅雷达模块导入失败: {e}")
-        except Exception as e:
-            logger.error(f"黑天鹅雷达启动失败: {e}")
+        # 使用安全启动函数启动黑天鹅雷达
+        radar_task = await safe_start_task(
+            lambda: start_radar(),
+            "黑天鹅雷达"
+        )
         
         # 3. 立即设置系统状态，不等待其他任务
         from src.system_state import SystemState
@@ -180,26 +246,7 @@ async def lifespan(app: FastAPI):
         except:
             pass
         
-        tasks = [discord_bot_task, radar_task]
-        for task in tasks:
-            if task and not task.done():
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    logger.info(f"✅ 任务已取消")
-        
-        if discord_bot and discord_bot.is_ready():
-            from src.discord_bot import stop_bot_services
-            await stop_bot_services(discord_bot)
-            logger.info("✅ Discord 服务已停止")
-        if exchange:
-            try:
-                await exchange.close()
-                logger.info("✅ 交易所连接已关闭")
-            except Exception as e:
-                logger.error(f"关闭交易所失败: {e}")
-        logger.info("✅ 系统安全关闭")
+        await graceful_shutdown()
 
 # --- FastAPI 应用 ---
 app = FastAPI(
@@ -220,40 +267,78 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {
-        "status": "ok",
-        "timestamp": time.time()
+    checks = {
+        "status": "unknown",
+        "timestamp": time.time(),
+        "components": {
+            "config": hasattr(CONFIG, 'discord_token'),
+            "database": False,
+            "exchange": False,
+            "discord": False,
+            "radar": False
+        }
     }
+    
+    # 检查数据库
+    try:
+        from src.database import check_database_health
+        checks["components"]["database"] = await check_database_health()
+    except:
+        pass
+    
+    # 检查交易所
+    if hasattr(app.state, 'exchange'):
+        try:
+            await app.state.exchange.fetch_time()
+            checks["components"]["exchange"] = True
+        except:
+            pass
+    
+    # 检查Discord
+    if discord_bot and discord_bot.is_ready():
+        checks["components"]["discord"] = True
+    
+    # 检查雷达
+    if radar_task and not radar_task.done():
+        checks["components"]["radar"] = True
+    
+    # 设置整体状态
+    checks["status"] = "ok" if all(checks["components"].values()) else "degraded"
+    
+    return checks
 
 @app.get("/startup-check")
 async def startup_check():
     checks = {
-        "config_loaded": hasattr(CONFIG, 'discord_token'),
-        "db_accessible": False,
-        "exchange_ready": False,
-        "discord_ready": False,
-        "radar_ready": False
+        "status": "unknown",
+        "components": {
+            "config_loaded": hasattr(CONFIG, 'discord_token'),
+            "db_accessible": False,
+            "exchange_ready": False,
+            "discord_ready": False,
+            "radar_ready": False
+        }
     }
     
     try:
         from src.database import engine
         async with engine.connect():
-            checks["db_accessible"] = True
+            checks["components"]["db_accessible"] = True
         if hasattr(app.state, 'exchange'):
             try:
                 await app.state.exchange.fetch_time()
-                checks["exchange_ready"] = True
+                checks["components"]["exchange_ready"] = True
             except:
                 pass
         if discord_bot and discord_bot.is_ready():
-            checks["discord_ready"] = True
+            checks["components"]["discord_ready"] = True
         if radar_task and not radar_task.done():
-            checks["radar_ready"] = True
+            checks["components"]["radar_ready"] = True
     except Exception as e:
         logger.error(f"健康检查失败: {e}")
     
     return {
-        "status": "ok" if all(checks.values()) else "degraded",
+        "status": "ok" if all(checks["components"].values()) else "degraded",
         "checks": checks
     }
 
@@ -271,22 +356,35 @@ async def tradingview_webhook(request: Request):
     if not rate_limit_check(client_ip):
         raise HTTPException(429, detail="请求过于频繁")
     
-    from src.system_state import SystemState
-    if not await SystemState.is_active():
-        current_state = await SystemState.get_state()
-        raise HTTPException(503, detail=f"系统未激活 ({current_state})")
-
     try:
         signal_data = await request.json()
-        logger.info(f"收到交易信号: {signal_data}")
+        
+        # 记录详细的信号信息
+        logger.info(f"收到交易信号 - IP: {client_ip}, 数据: {signal_data}")
+        
+        # 添加信号验证
+        required_fields = ['symbol', 'action', 'price']
+        if not all(field in signal_data for field in required_fields):
+            raise ValueError("缺少必要的信号字段")
+        
+        # 检查系统状态
+        from src.system_state import SystemState
+        if not await SystemState.is_active():
+            current_state = await SystemState.get_state()
+            logger.warning(f"系统未激活，拒绝处理信号 - 当前状态: {current_state}")
+            raise HTTPException(503, detail=f"系统未激活 ({current_state})")
         
         # 这里可以添加处理交易信号的逻辑
         # 例如：调用交易函数执行下单操作
         
-        return {"status": "processed"}
+        return {"status": "processed", "timestamp": time.time()}
+        
+    except ValueError as e:
+        logger.error(f"信号数据验证失败: {e}")
+        raise HTTPException(400, detail=str(e))
     except Exception as e:
-        logger.error(f"信号处理失败: {e}")
-        raise HTTPException(400, detail="无效的JSON数据")
+        logger.error(f"信号处理失败: {e}", exc_info=True)
+        raise HTTPException(500, detail="内部处理错误")
 
 # --- 主函数 ---
 if __name__ == "__main__":
