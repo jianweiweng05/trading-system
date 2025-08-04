@@ -4,7 +4,8 @@ FROM python:3.10-slim as builder
 # 设置环境变量
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # 安装构建依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -51,7 +52,11 @@ ENV PATH=/home/trader/.local/bin:$PATH \
     PYTHONPATH=/app \
     PYTHONMALLOC=malloc \
     MALLOC_ARENA_MAX=2 \
-    PYTHONOPTIMIZE=1
+    PYTHONOPTIMIZE=1 \
+    PYTHONUNBUFFERED=1
+
+# 创建data目录
+RUN mkdir -p /app/data && chown trader:trader /app/data
 
 # 切换到非root用户
 USER trader
