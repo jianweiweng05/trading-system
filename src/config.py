@@ -12,6 +12,9 @@ class Config(BaseSettings):
     discord_prefix: str = Field(default="!", env="DISCORD_PREFIX")
     run_mode: str = Field(default="simulate", env="RUN_MODE")
     
+    # AI分析相关配置
+    deepseek_api_key: str = Field(..., env="DEEPSEEK_API_KEY")
+    
     # 新增的UI相关配置项（都有默认值）
     leverage: float = Field(default=5.0, env="LEVERAGE")
     firepower: float = Field(default=0.8, env="FIRESPOWER")
@@ -35,6 +38,8 @@ class Config(BaseSettings):
             raise ValueError("TradingView Webhook密钥未设置")
         if not self.discord_channel_id:
             raise ValueError("Discord频道ID未设置")
+        if not self.deepseek_api_key:
+            raise ValueError("DeepSeek API密钥未设置")
 
 # 创建全局配置实例
 CONFIG = Config()
