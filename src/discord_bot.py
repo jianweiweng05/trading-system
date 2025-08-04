@@ -68,6 +68,31 @@ class TradingCommands(commands.Cog, name="交易系统"):
     def __init__(self, bot):
         self.bot = bot
     
+    async def check_exchange_status(self):
+        """检查交易所连接状态"""
+        try:
+            # 检查是否有交易所数据
+            if not hasattr(self.bot, 'bot_data') or 'exchange' not in self.bot.bot_data:
+                return False
+            
+            exchange = self.bot.bot_data['exchange']
+            
+            # 检查交易所对象是否有效
+            if not exchange:
+                return False
+            
+            # 尝试获取服务器时间来验证连接
+            try:
+                await exchange.fetch_time()
+                return True
+            except Exception as e:
+                logger.error(f"验证交易所连接失败: {e}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"检查交易所状态失败: {e}")
+            return False
+    
     # 旧版文本命令（!status）
     @commands.command(name="status", help="查看系统状态")
     async def text_status(self, ctx):
@@ -81,8 +106,9 @@ class TradingCommands(commands.Cog, name="交易系统"):
             embed.add_field(name="Bot状态", value="🟢 在线")
             embed.add_field(name="延迟", value=f"{round(self.bot.latency * 1000)} ms")
             
-            # 如果有交易所数据，添加到状态中
-            if hasattr(self.bot, 'bot_data') and 'exchange' in self.bot.bot_data:
+            # 检查交易所连接状态
+            exchange_status = await self.check_exchange_status()
+            if exchange_status:
                 embed.add_field(name="交易所连接", value="🟢 已连接", inline=False)
             else:
                 embed.add_field(name="交易所连接", value="🔴 未连接", inline=False)
@@ -106,8 +132,9 @@ class TradingCommands(commands.Cog, name="交易系统"):
             embed.add_field(name="Bot状态", value="🟢 在线")
             embed.add_field(name="延迟", value=f"{round(self.bot.latency * 1000)} ms")
             
-            # 如果有交易所数据，添加到状态中
-            if hasattr(self.bot, 'bot_data') and 'exchange' in self.bot.bot_data:
+            # 检查交易所连接状态
+            exchange_status = await self.check_exchange_status()
+            if exchange_status:
                 embed.add_field(name="交易所连接", value="🟢 已连接", inline=False)
             else:
                 embed.add_field(name="交易所连接", value="🔴 未连接", inline=False)
