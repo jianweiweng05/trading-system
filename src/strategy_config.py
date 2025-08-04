@@ -1,14 +1,37 @@
-fastapi==0.110.0
-uvicorn[standard]==0.29.0
-ccxt==4.3.30
-aiosqlite==0.19.0
-pandas==1.5.3
-numpy==1.24.4
-pandas-ta==0.3.14b0
-sqlalchemy==1.4.46
-pydantic>=2.3.0,<3.0.0
-pydantic-settings>=2.2.1
-discord.py==2.3.2
-PyNaCl==1.5.0
-feedparser==6.0.10
-httpx==0.27.0
+import logging
+from typing import ClassVar, Final
+from src.database import get_setting
+
+logger = logging.getLogger(__name__)
+
+class StrategyConfig:
+    """策略配置类"""
+    leverage: ClassVar[int] = 3
+    MACRO_COEFF: Final[float] = 1.0
+    
+    @classmethod
+    async def load_from_db(cls):
+        """从数据库加载配置"""
+        try:
+            leverage_value = await get_setting('leverage', str(cls.leverage))
+            cls.leverage = int(leverage_value)
+            logger.info(f"策略配置已更新: leverage={cls.leverage}")
+            return True
+        except ValueError as e:
+            logger.error(f"杠杆系数格式错误: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"加载策略配置失败: {e}")
+            return False
+    
+    @classmethod
+    async def save_to_db(cls):
+        """保存配置到数据库"""
+        try:
+            from src.database import set_setting
+            await set_setting('leverage', str(cls.leverage))
+            logger.info(f"策略配置已保存: leverage={cls.leverage}")
+            return True
+        except Exception as e:
+            logger.error(f"保存策略配置失败: {e}")
+            return False
