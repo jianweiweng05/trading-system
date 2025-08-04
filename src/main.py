@@ -72,6 +72,15 @@ async def start_discord_bot():
             'config': CONFIG
         }
         
+        # 验证交易所连接
+        if discord_bot.bot_data['exchange']:
+            try:
+                await discord_bot.bot_data['exchange'].fetch_time()
+                logger.info("✅ 交易所连接验证成功")
+            except Exception as e:
+                logger.error(f"❌ 交易所连接验证失败: {e}")
+                discord_bot.bot_data['exchange'] = None
+        
         # 初始化机器人
         await initialize_bot(discord_bot)
         
