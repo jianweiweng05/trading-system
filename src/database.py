@@ -7,7 +7,6 @@ from functools import wraps
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy import (
     Table, Column, Integer, String, Float, DateTime, MetaData, insert, select, update, func, Text, text
 )
@@ -58,22 +57,22 @@ Base = declarative_base()
 class Trade(Base):
     __tablename__ = 'trades'
     
-    id: Mapped[int] = mapped_column(primary_key=True)
-    symbol: Mapped[str] = mapped_column(nullable=False, index=True)
-    quantity: Mapped[float] = mapped_column(nullable=False)
-    entry_price: Mapped[float] = mapped_column(nullable=False)
-    exit_price: Mapped[Optional[float]]
-    trade_type: Mapped[str] = mapped_column(nullable=False)
-    status: Mapped[str] = mapped_column(nullable=False, default='OPEN', index=True)
-    strategy_id: Mapped[str]
-    created_at: Mapped[datetime] = mapped_column(default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
+    id = Column(Integer, primary_key=True)
+    symbol = Column(String, nullable=False, index=True)
+    quantity = Column(Float, nullable=False)
+    entry_price = Column(Float, nullable=False)
+    exit_price = Column(Float, nullable=True)
+    trade_type = Column(String, nullable=False)
+    status = Column(String, nullable=False, default='OPEN', index=True)
+    strategy_id = Column(String)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 class Setting(Base):
     __tablename__ = 'settings'
     
-    key: Mapped[str] = mapped_column(primary_key=True)
-    value: Mapped[str]
+    key = Column(String, primary_key=True)
+    value = Column(Text)
 
 trades = Table(
     'trades', metadata,
