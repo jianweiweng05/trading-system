@@ -8,8 +8,8 @@ import feedparser
 import httpx
 
 # 导入共享的组件
-from config import CONFIG
-from system_state import SystemState
+from src.config import CONFIG
+from src.system_state import SystemState
 
 logger = logging.getLogger("BlackSwanRadar")
 
