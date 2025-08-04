@@ -277,3 +277,6 @@ async def start_discord_bot():
     except Exception as e:
         logger.error(f"Discord Bot 启动失败: {e}")
         raise
+
+# 添加导出声明
+__all__ = ['start_radar']
