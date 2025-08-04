@@ -90,9 +90,9 @@ async def mark_as_processed(url):
 
 # --- 信息抓取模块 ---
 async def fetch_rss_feeds():
-    urls = ["https://www.coindesk.com/arc/outboundfeeds/rss/", "https://cointelegraph.com/rss"]
+    urls = ["https://www.coindesk.com/arc/outboundfeeds/rss", "https://cointelegraph.com/rss"]
     headlines = []
-    async with httpx.AsyncClient(timeout=15.0) as client:
+    async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
         for url in urls:
             for attempt in range(3):  # 添加重试机制
                 try:
