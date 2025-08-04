@@ -4,7 +4,6 @@ from discord.ext import commands
 from discord.ui import Button, Select, View, Modal, TextInput
 import logging
 from src.config import CONFIG
-from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +11,7 @@ class TradingModeView(View):
     """交易模式切换视图"""
     def __init__(self):
         super().__init__(timeout=None)
-        self.current_mode = CONFIG.run_mode  # 假设这是当前模式
+        self.current_mode = CONFIG.run_mode
         
         # 创建模拟交易按钮
         self.sim_button = Button(
@@ -38,7 +37,6 @@ class TradingModeView(View):
             await interaction.response.send_message("已经在模拟交易模式", ephemeral=True)
             return
         
-        # 这里添加模式切换逻辑
         try:
             # 更新配置
             CONFIG.run_mode = "simulate"
@@ -80,10 +78,6 @@ class TradingModeView(View):
             view=confirm_view,
             ephemeral=True
         )
-    
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # 只允许特定用户操作
-        return True  # 这里可以添加权限检查
 
 class ConfirmView(View):
     """确认对话框"""
@@ -147,7 +141,7 @@ class ParameterControlView(View):
         
         # 火力系数输入框
         self.firepower_button = Button(
-            label=f"火力系数: {CONFIG.firepower}",  # 假设这是当前值
+            label=f"火力系数: {getattr(CONFIG, 'firepower', 0.8)}",  # 使用getattr获取默认值
             style=discord.ButtonStyle.blurple,
             custom_id="firepower_input"
         )
@@ -370,17 +364,17 @@ class TradingDashboard(commands.Cog, name="交易面板"):
             # 添加当前参数值
             embed.add_field(
                 name="杠杆系数",
-                value=f"{CONFIG.leverage}x",
+                value=f"{getattr(CONFIG, 'leverage', 5.0)}x",
                 inline=True
             )
             embed.add_field(
                 name="火力系数",
-                value=str(CONFIG.firepower),
+                value=str(getattr(CONFIG, 'firepower', 0.8)),
                 inline=True
             )
             embed.add_field(
                 name="资本分配",
-                value=CONFIG.allocation,
+                value=getattr(CONFIG, 'allocation', 'balanced'),
                 inline=True
             )
             
@@ -416,6 +410,3 @@ class TradingDashboard(commands.Cog, name="交易面板"):
         except Exception as e:
             logger.error(f"打开快速操作面板失败: {e}")
             await interaction.response.send_message("❌ 打开快速操作面板失败，请稍后重试", ephemeral=True)
-
-def setup(bot):
-    bot.add_cog(TradingDashboard(bot))
