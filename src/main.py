@@ -83,21 +83,8 @@ async def lifespan(app: FastAPI):
         app.state.exchange = exchange
         logger.info("✅ 交易所连接已建立")
         
-        # 3. 启动 Discord Bot
-        # 创建后台任务启动Discord机器人
+        # 3. 启动 Discord Bot（作为后台任务）
         discord_bot_task = asyncio.create_task(start_discord_bot())
-        # 等待Discord机器人启动完成
-        discord_bot = await discord_bot_task
-        
-        # 设置机器人数据
-        discord_bot.bot_data = {
-            'exchange': exchange,
-            'config': CONFIG
-        }
-        
-        # 将机器人实例存储在app.state中
-        app.state.discord_bot = discord_bot
-        
         logger.info("✅ Discord Bot 启动任务已创建")
         
         # 4. 设置系统状态
