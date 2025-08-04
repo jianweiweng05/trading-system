@@ -20,17 +20,21 @@ class SystemState:
         return cls._instance
     
     @classmethod
-    def set_alert_callback(cls, callback: Callable[[str, str], Awaitable[None]]):
+    def set_alert_callback(cls, callback: Callable[[str, str, object], Awaitable[None]]):
         """
         设置状态变更时的警报回调函数。
         这个函数必须是一个可等待的异步函数。
+        参数说明:
+        - old_state: 旧的状态
+        - new_state: 新的状态
+        - application: 应用实例（可选）
         """
         cls._alert_callback = callback
     
     @classmethod
     async def set_state(cls, new_state: str, application=None):
         """安全地更新系统状态，并在变更时触发警报。"""
-        valid_states = ["STARTING", "ACTIVE", "PAUSED", "HALTED", "EMERGENCY"]
+        valid_states = ["STARTING", "ACTIVE", "PAUSED", "HALTED", "EMERGENCY", "ERROR", "SHUTDOWN"]
         if new_state not in valid_states:
             logger.error(f"尝试设置一个无效的系统状态: {new_state}")
             raise ValueError(f"无效状态: {new_state}")
@@ -56,4 +60,27 @@ class SystemState:
     async def is_active(cls) -> bool:
         """检查系统是否处于允许新开仓的活动状态"""
         async with cls._lock:
-            return cls._state == "ACTIVE"
+            return cls._state in ["ACTIVE"]
+    
+    @classmethod
+    async def is_normal(cls) -> bool:
+        """检查系统是否处于正常状态"""
+        async with cls._lock:
+            return cls._state in ["ACTIVE", "PAUSED", "HALTED"]
+    
+    @classmethod
+    async def is_emergency(cls) -> bool:
+        """检查系统是否处于紧急状态"""
+        async with cls._lock:
+            return cls._state == "EMERGENCY"
+    
+    @classmethod
+    async def get_state_info(cls) -> dict:
+        """获取当前状态的详细信息"""
+        async with cls._lock:
+            return {
+                "state": cls._state,
+                "is_active": await cls.is_active(),
+                "is_normal": await cls.is_normal(),
+                "is_emergency": await cls.is_emergency()
+            }
