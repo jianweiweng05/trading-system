@@ -27,7 +27,8 @@ def get_db_paths():
     
     return os.path.join(base_path, "trading_system_v7.db")
 
-DATABASE_URL = f"sqlite+aiosqlite:///{get_db_path()}"
+# 修复了函数名错误
+DATABASE_URL = f"sqlite+aiosqlite:///{get_db_paths()}"  # 使用正确的函数名
 logger.info(f"数据库路径: {DATABASE_URL}")
 
 engine = create_async_engine(DATABASE_URL, echo=False)
@@ -188,9 +189,10 @@ async def get_position_by_symbol(symbol: str):
             position = result.fetchone()
             if position:
                 logger.info(f"找到 {symbol} 持仓: {position['quantity']} @ {position['entry_price']}")
-            return position
-            logger.info(f"未找到 {symbol} 的持仓")
-            return None
+                return position
+            else:
+                logger.info(f"未找到 {symbol} 的持仓")
+                return None
     except Exception as e:
         logger.error(f"获取持仓失败: {str(e)}")
         return None
