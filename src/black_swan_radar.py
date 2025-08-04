@@ -36,24 +36,57 @@ async def radar_db_query(query, params=(), commit=True):
         try:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(query, params)
-            if "SELECT" in query.upper(): return await cursor.fetchall()
-            if commit: await db.commit()
+            if "SELECT" in query.upper(): 
+                result = await cursor.fetchall()
+                return result
+            if commit: 
+                await db.commit()
         except Exception as e:
             logger.error(f"Radar DB query failed on {RADAR_DB_FILE}: {e}", exc_info=True)
+            return None
 
 async def init_radar_db():
-    await radar_db_query("CREATE TABLE IF NOT EXISTS intelligence (id INTEGER PRIMARY KEY, timestamp TEXT, source TEXT, content TEXT, risk_level TEXT, summary TEXT, UNIQUE(content))")
-    await radar_db_query("CREATE TABLE IF NOT EXISTS processed_items (url TEXT PRIMARY KEY, processed_at TEXT)")
+    await radar_db_query("""
+        CREATE TABLE IF NOT EXISTS intelligence (
+            id INTEGER PRIMARY KEY, 
+            timestamp TEXT, 
+            source TEXT, 
+            content TEXT, 
+            risk_level TEXT, 
+            summary TEXT,
+            analysis_data TEXT,
+            UNIQUE(content)
+        )
+    """)
+    await radar_db_query("""
+        CREATE TABLE IF NOT EXISTS processed_items (
+            url TEXT PRIMARY KEY, 
+            processed_at TEXT
+        )
+    """)
 
-async def log_intelligence(source, content, risk_level, summary):
-    await radar_db_query("INSERT OR IGNORE INTO intelligence (timestamp, source, content, risk_level, summary) VALUES (?, ?, ?, ?, ?)",
-                   (datetime.utcnow().isoformat(), source, content, risk_level, summary))
+async def log_intelligence(source, content, risk_level, summary, analysis_data=None):
+    """更新后的日志函数，支持JSON格式的分析数据"""
+    await radar_db_query("""
+        INSERT OR IGNORE INTO intelligence 
+        (timestamp, source, content, risk_level, summary, analysis_data) 
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        datetime.utcnow().isoformat(), 
+        source, 
+        content, 
+        risk_level, 
+        summary,
+        json.dumps(analysis_data) if analysis_data else None
+    ))
 
 async def has_been_processed(url):
-    return await radar_db_query("SELECT 1 FROM processed_items WHERE url = ?", (url,), commit=False)
+    result = await radar_db_query("SELECT 1 FROM processed_items WHERE url = ?", (url,), commit=False)
+    return bool(result)
 
 async def mark_as_processed(url):
-    await radar_db_query("INSERT INTO processed_items (url, processed_at) VALUES (?, ?)", (url, datetime.utcnow().isoformat()))
+    await radar_db_query("INSERT INTO processed_items (url, processed_at) VALUES (?, ?)", 
+                        (url, datetime.utcnow().isoformat()))
 
 # --- 信息抓取模块 ---
 async def fetch_rss_feeds():
@@ -64,10 +97,15 @@ async def fetch_rss_feeds():
             for attempt in range(3):  # 添加重试机制
                 try:
                     response = await client.get(url)
+                    response.raise_for_status()
                     feed = feedparser.parse(response.text)
                     for entry in feed.entries[:5]:
                         if entry.link and not await has_been_processed(entry.link):
-                            headlines.append(entry.title)
+                            headlines.append({
+                                'title': entry.title,
+                                'link': entry.link,
+                                'published': entry.published
+                            })
                             await mark_as_processed(entry.link)
                     break
                 except Exception as e:
@@ -78,8 +116,10 @@ async def fetch_rss_feeds():
 
 # --- AI分析模块 (V2.0 Prompt) ---
 async def analyze_with_deepseek(headlines: list):
-    if not headlines: return None
-    intelligence_brief = "\n- ".join(headlines)
+    if not headlines: 
+        return None
+    
+    intelligence_brief = "\n- ".join([h['title'] for h in headlines])
     
     prompt = f"""
 ### ROLE ###
@@ -104,6 +144,7 @@ You MUST respond ONLY with a single, valid JSON object with these exact fields:
 - "alert": boolean (true or false)
 - "level": string ("normal", "high", "critical")
 - "reasoning": string (A brief, data-driven explanation, max 15 words.)
+- "source_headline": string (The headline that triggered this alert)
 
 ---
 ### INTELLIGENCE BRIEF ###
@@ -115,13 +156,14 @@ You MUST respond ONLY with a single, valid JSON object with these exact fields:
                 "https://api.deepseek.com/chat/completions",
                 headers={"Authorization": f"Bearer {CONFIG.deepseek_api_key}"},
                 json={
-                    "model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}],
+                    "model": "deepseek-chat", 
+                    "messages": [{"role": "user", "content": prompt}],
                     "response_format": {"type": "json_object"}
                 },
                 timeout=45.0
             )
             response.raise_for_status()
-            return response.json()['choices'][0]['message']['content']
+            return json.loads(response.json()['choices'][0]['message']['content'])
     except Exception as e:
         logger.error(f"DeepSeek API调用失败: {e}")
         return None
@@ -151,26 +193,32 @@ class RadarController:
                 headlines = await fetch_rss_feeds()
                 if headlines:
                     logger.info(f"发现 {len(headlines)} 条新情报，正在提交AI分析...")
-                    analysis_result_str = await analyze_with_deepseek(headlines)
+                    analysis_result = await analyze_with_deepseek(headlines)
                     
-                    if analysis_result_str:
-                        analysis = json.loads(analysis_result_str)
+                    if analysis_result:
                         # 记录所有高价值情报
-                        if analysis.get('level') in ['high', 'critical']:
-                           await log_intelligence(headlines[0], analysis.get('reasoning'), analysis.get('level'), analysis.get('reasoning'))
+                        if analysis_result.get('level') in ['high', 'critical']:
+                            await log_intelligence(
+                                source="AI Analysis",
+                                content=headlines[0]['title'],
+                                risk_level=analysis_result.get('level'),
+                                summary=analysis_result.get('reasoning'),
+                                analysis_data=analysis_result
+                            )
 
                         # 二次验证熔断逻辑
                         now = datetime.utcnow()
-                        self.critical_event_timestamps = [t for t in self.critical_event_timestamps if (now - t).total_seconds() < 1800]  # 30分钟
+                        self.critical_event_timestamps = [t for t in self.critical_event_timestamps 
+                                                        if (now - t).total_seconds() < 1800]  # 30分钟
 
-                        if analysis.get('level') == 'critical':
+                        if analysis_result.get('level') == 'critical':
                             self.critical_event_timestamps.append(now)
                             if len(self.critical_event_timestamps) >= 2:
-                                logger.critical(f"二次验证通过！黑天鹅事件确认: {analysis.get('reasoning')}")
+                                logger.critical(f"二次验证通过！黑天鹅事件确认: {analysis_result.get('reasoning')}")
                                 await SystemState.set_state("EMERGENCY")
-                                self.critical_event_timestamps = [] # 触发后清空计数
+                                self.critical_event_timestamps = []  # 触发后清空计数
                             else:
-                                logger.warning(f"一级危急事件警报，等待二次确认: {analysis.get('reasoning')}")
+                                logger.warning(f"一级危急事件警报，等待二次确认: {analysis_result.get('reasoning')}")
                 else:
                     logger.info("无新情报，一切正常。")
 
@@ -178,7 +226,7 @@ class RadarController:
                 await self.log_error(e)
                 logger.error(f"雷达主循环发生错误: {e}", exc_info=True)
 
-            await asyncio.sleep(900) # 15分钟
+            await asyncio.sleep(900)  # 15分钟
 
 async def start_radar():
     """启动黑天鹅雷达的入口函数"""
