@@ -4,11 +4,11 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     
-    # 新增的预启动命令
+    # 修改数据目录路径以匹配Dockerfile
     preStartCommand: |
-      mkdir -p /var/data
-      chmod 777 /var/data
-      echo "✅ 数据库目录权限已设置"
+      mkdir -p /app/data
+      chmod 750 /app/data
+      echo "✅ 数据目录权限已设置"
     
     healthCheck:
       path: /health
@@ -18,7 +18,7 @@ services:
       - key: PORT
         value: 8000
       - key: RENDER
-        value: "true"  # 标记Render环境
+        value: "true"
       - key: EXCHANGE_MAX_RETRIES
         value: "3"
       - key: EXCHANGE_RETRY_DELAY
