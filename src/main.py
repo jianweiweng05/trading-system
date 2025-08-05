@@ -396,5 +396,6 @@ if __name__ == "__main__":
         "src.main:app",
         host="0.0.0.0",
         port=port,
-        log_level="info"
+        log_level="info",
+        workers=1  # 减少worker数量为1，避免内存溢出
     )
