@@ -13,6 +13,8 @@ import uvicorn
 
 # --- 导入配置 ---
 from src.config import CONFIG
+# --- 导入系统状态模块 ---
+from src.system_state import SystemState
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -120,7 +122,6 @@ async def check_system_status() -> Dict[str, Any]:
     }
     
     try:
-        from src.system_state import SystemState
         current_state = await SystemState.get_state()
         status["state"] = current_state
         status["components"]["system_state"] = True
@@ -227,7 +228,6 @@ async def lifespan(app: FastAPI):
         )
         
         # 3. 立即设置系统状态，不等待其他任务
-        from src.system_state import SystemState
         await SystemState.set_state("ACTIVE", discord_bot)
         startup_complete = True
         logger.info("🚀 系统启动完成 (状态: ACTIVE)")
@@ -370,7 +370,6 @@ async def tradingview_webhook(request: Request) -> Dict[str, Any]:
             raise ValueError("缺少必要的信号字段")
         
         # 检查系统状态
-        from src.system_state import SystemState
         if not await SystemState.is_active():
             current_state = await SystemState.get_state()
             logger.warning(f"系统未激活，拒绝处理信号 - 当前状态: {current_state}")
