@@ -1,86 +1,45 @@
 import asyncio
 import logging
-from typing import Callable, Awaitable
+from typing import Optional, Callable, Awaitable
 
 logger = logging.getLogger(__name__)
 
 class SystemState:
-    """
-    一个线程安全的、全局的系统状态管理器 (单例模式)。
-    负责同步整个应用的状态，并在状态变更时触发回调。
-    """
-    _instance = None
-    _state: str = "STARTING"  # 初始状态
+    """系统状态管理（最小改进版）"""
+    _state: str = "STARTING"
     _lock = asyncio.Lock()
-    _alert_callback: Callable[[str, str, object], Awaitable[None]] = None
-    
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(SystemState, cls).__new__(cls)
-        return cls._instance
-    
+    _alert_callback: Optional[Callable[[str, str], Awaitable[None]]] = None
+
     @classmethod
-    def set_alert_callback(cls, callback: Callable[[str, str, object], Awaitable[None]]):
-        """
-        设置状态变更时的警报回调函数。
-        这个函数必须是一个可等待的异步函数。
-        参数说明:
-        - old_state: 旧的状态
-        - new_state: 新的状态
-        - application: 应用实例（可选）
-        """
+    def set_alert_callback(cls, callback: Callable[[str, str], Awaitable[None]]):
+        """设置回调（仅增加类型检查）"""
+        if not callable(callback):
+            raise TypeError("回调必须是可调用对象")
         cls._alert_callback = callback
-    
+
     @classmethod
-    async def set_state(cls, new_state: str, application=None):
-        """安全地更新系统状态，并在变更时触发警报。"""
-        valid_states = ["STARTING", "ACTIVE", "PAUSED", "HALTED", "EMERGENCY", "ERROR", "SHUTDOWN"]
+    async def set_state(cls, new_state: str):
+        """状态变更（仅增加基础校验）"""
+        valid_states = {"STARTING", "ACTIVE", "PAUSED", "HALTED", "EMERGENCY"}
         if new_state not in valid_states:
-            logger.error(f"尝试设置一个无效的系统状态: {new_state}")
-            raise ValueError(f"无效状态: {new_state}")
-        
+            raise ValueError(f"非法状态: {new_state}")
+
         async with cls._lock:
             old_state = cls._state
-            if old_state != new_state:
-                cls._state = new_state
-                logger.critical(f"系统状态已变更: 从 {old_state} -> {new_state}")
-                
-                # 如果设置了回调函数，则异步调用它
-                if cls._alert_callback:
-                    # 使用application参数来避免循环导入
-                    asyncio.create_task(cls._alert_callback(old_state, new_state, application))
-    
+            if old_state == new_state:
+                return
+
+            cls._state = new_state
+            logger.critical(f"状态变更: {old_state} → {new_state}")
+
+            if cls._alert_callback:
+                try:
+                    await cls._alert_callback(old_state, new_state)
+                except Exception as e:
+                    logger.error(f"回调执行失败: {e}", exc_info=True)
+
     @classmethod
     async def get_state(cls) -> str:
-        """安全地获取当前系统状态"""
+        """获取当前状态（线程安全）"""
         async with cls._lock:
             return cls._state
-    
-    @classmethod
-    async def is_active(cls) -> bool:
-        """检查系统是否处于允许新开仓的活动状态"""
-        async with cls._lock:
-            return cls._state in ["ACTIVE"]
-    
-    @classmethod
-    async def is_normal(cls) -> bool:
-        """检查系统是否处于正常状态"""
-        async with cls._lock:
-            return cls._state in ["ACTIVE", "PAUSED", "HALTED"]
-    
-    @classmethod
-    async def is_emergency(cls) -> bool:
-        """检查系统是否处于紧急状态"""
-        async with cls._lock:
-            return cls._state == "EMERGENCY"
-    
-    @classmethod
-    async def get_state_info(cls) -> dict:
-        """获取当前状态的详细信息"""
-        current_state = await cls.get_state()
-        return {
-            "state": current_state,
-            "is_active": current_state in ["ACTIVE"],
-            "is_normal": current_state in ["ACTIVE", "PAUSED", "HALTED"],
-            "is_emergency": current_state == "EMERGENCY"
-        }
