@@ -6,6 +6,7 @@ from config import CONFIG
 from database import set_config
 from .macro_analyzer import MacroAnalyzer
 from .report_generator import ReportGenerator
+from .black_swan_radar import BlackSwanRadar
 
 logger = logging.getLogger("ai_service")
 
@@ -15,6 +16,7 @@ class AIService:
     def __init__(self):
         self.macro_analyzer = MacroAnalyzer(CONFIG.deepseek_api_key)
         self.report_generator = ReportGenerator(CONFIG.deepseek_api_key)
+        self.black_swan_radar = BlackSwanRadar(CONFIG.deepseek_api_key)
         self.scheduler = AsyncIOScheduler(timezone="UTC")
     
     async def send_discord_webhook(self, webhook_url: str, content: str, title: str, color: int):
@@ -76,6 +78,19 @@ class AIService:
                 report["color"]
             )
     
+    async def black_swan_scan(self):
+        """黑天鹅扫描任务"""
+        logger.info("执行黑天鹅风险扫描...")
+        report = await self.black_swan_radar.scan_and_alert()
+        
+        if report:
+            await self.send_discord_webhook(
+                CONFIG.discord_alert_webhook,
+                report['content'],
+                report['title'],
+                report['color']
+            )
+    
     async def start(self):
         """启动AI服务"""
         logger.info("AI参谋部 (报告与宏观) 已启动")
@@ -107,6 +122,14 @@ class AIService:
             hour=0,
             minute=10,
             id='monthly_report'
+        )
+        
+        # 添加黑天鹅扫描任务
+        self.scheduler.add_job(
+            self.black_swan_scan,
+            'cron',
+            hour='*/2',  # 每2小时扫描一次
+            id='black_swan_scan'
         )
         
         self.scheduler.start()
