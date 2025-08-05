@@ -56,13 +56,5 @@ Thumbs.db
 local_settings.py
 dev_settings.py
 
-# 开发工具
-.ipynb_checkpoints
-.mypy_cache/
-
-# 临时文件
-*.tmp
-*.temp
-
 # Render平台
 .render.yaml
