@@ -11,15 +11,32 @@ class SystemState:
     _alert_callback: Optional[Callable[[str, str], Awaitable[None]]] = None
 
     @classmethod
-    def set_alert_callback(cls, callback: Callable[[str, str], Awaitable[None]]):
-        """设置回调（仅增加类型检查）"""
+    def set_alert_callback(cls, callback: Callable[[str, str], Awaitable[None]]) -> None:
+        """
+        设置状态变更回调函数
+        
+        Args:
+            callback: 回调函数，接收旧状态和新状态作为参数
+            
+        Raises:
+            TypeError: 当回调不是可调用对象时
+        """
         if not callable(callback):
             raise TypeError("回调必须是可调用对象")
         cls._alert_callback = callback
 
     @classmethod
-    async def set_state(cls, new_state: str):
-        """状态变更（仅增加基础校验）"""
+    async def set_state(cls, new_state: str) -> None:
+        """
+        设置系统状态
+        
+        Args:
+            new_state: 新状态，必须是以下值之一：
+                      "STARTING", "ACTIVE", "PAUSED", "HALTED", "EMERGENCY"
+                      
+        Raises:
+            ValueError: 当状态值不在允许范围内时
+        """
         valid_states = {"STARTING", "ACTIVE", "PAUSED", "HALTED", "EMERGENCY"}
         if new_state not in valid_states:
             raise ValueError(f"非法状态: {new_state}")
@@ -40,6 +57,11 @@ class SystemState:
 
     @classmethod
     async def get_state(cls) -> str:
-        """获取当前状态（线程安全）"""
+        """
+        获取当前系统状态
+        
+        Returns:
+            str: 当前系统状态值
+        """
         async with cls._lock:
             return cls._state
