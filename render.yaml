@@ -12,7 +12,7 @@ services:
     
     healthCheck:
       path: /health
-      initialDelaySeconds: 120
+      initialDelaySeconds: 180  # 增加到180秒，给系统更多启动时间
       
     envVars:
       - key: PORT
