@@ -5,6 +5,7 @@ import hmac
 import hashlib
 import os
 from contextlib import asynccontextmanager
+from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from ccxt.async_support import binance
@@ -21,11 +22,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- 全局变量 ---
-REQUEST_LOG = {}
-discord_bot_task = None  # 用于存储Discord机器人任务
-discord_bot = None  # 用于存储Discord机器人实例
-radar_task = None  # 用于存储黑天鹅雷达任务
-startup_complete = False  # 标记系统是否完全启动
+REQUEST_LOG: Dict[str, list] = {}
+discord_bot_task: Optional[asyncio.Task] = None
+discord_bot: Optional[Any] = None
+radar_task: Optional[asyncio.Task] = None
+startup_complete: bool = False
 
 # --- 辅助函数 ---
 def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
@@ -45,7 +46,7 @@ def rate_limit_check(client_ip: str) -> bool:
     return True
 
 # --- Discord Bot 启动函数 ---
-async def start_discord_bot():
+async def start_discord_bot() -> Optional[Any]:
     """启动Discord机器人的异步函数"""
     global discord_bot
     try:
@@ -55,8 +56,8 @@ async def start_discord_bot():
         discord_bot = get_bot()
         
         # 等待交易所连接建立
-        max_retries = 20  # 增加重试次数
-        retry_delay = 2   # 增加重试间隔
+        max_retries = 20
+        retry_delay = 2
         
         for i in range(max_retries):
             if hasattr(app.state, 'exchange') and app.state.exchange:
@@ -92,25 +93,25 @@ async def start_discord_bot():
         
         return discord_bot
     except Exception as e:
-        logger.error(f"Discord机器人启动失败: {e}")
+        logger.error(f"Discord机器人启动失败: {e}", exc_info=True)
         raise
 
 # --- 安全启动任务包装函数 ---
-async def safe_start_task(task_func, name: str):
+async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
     """安全启动任务的包装函数"""
     try:
         task = asyncio.create_task(task_func())
         logger.info(f"✅ {name}启动任务已创建")
         return task
     except ImportError as e:
-        logger.error(f"{name}模块导入失败: {e}")
+        logger.error(f"{name}模块导入失败: {e}", exc_info=True)
         return None
     except Exception as e:
-        logger.error(f"{name}启动失败: {e}")
+        logger.error(f"{name}启动失败: {e}", exc_info=True)
         return None
 
 # --- 系统状态检查函数 ---
-async def check_system_status() -> dict:
+async def check_system_status() -> Dict[str, Any]:
     """检查系统整体状态"""
     status = {
         "state": "unknown",
@@ -123,7 +124,8 @@ async def check_system_status() -> dict:
         current_state = await SystemState.get_state()
         status["state"] = current_state
         status["components"]["system_state"] = True
-    except:
+    except Exception as e:
+        logger.error(f"系统状态检查失败: {e}", exc_info=True)
         status["components"]["system_state"] = False
     
     return status
@@ -190,13 +192,13 @@ async def lifespan(app: FastAPI):
         max_retries = int(os.getenv("EXCHANGE_MAX_RETRIES", "3"))
         for i in range(max_retries):
             try:
-                await asyncio.sleep(int(os.getenv("EXCHANGE_RETRY_DELAY", "5")) * i)  # 递增延迟
+                await asyncio.sleep(int(os.getenv("EXCHANGE_RETRY_DELAY", "5")) * i)
                 await exchange.load_markets()
                 logger.info("✅ 交易所连接已建立")
                 break
             except Exception as e:
                 if i == max_retries - 1:
-                    logger.error(f"❌ 交易所连接失败: {e}")
+                    logger.error(f"❌ 交易所连接失败: {e}", exc_info=True)
                     raise
                 logger.warning(f"交易所连接重试 {i + 1}/{max_retries}")
         
@@ -236,15 +238,15 @@ async def lifespan(app: FastAPI):
         logger.critical(f"启动失败: {e}", exc_info=True)
         try:
             await SystemState.set_state("ERROR")
-        except:
-            pass
+        except Exception as state_error:
+            logger.error(f"设置错误状态失败: {state_error}", exc_info=True)
         raise
     finally:
         logger.info("🛑 系统关闭中...")
         try:
             await SystemState.set_state("SHUTDOWN")
-        except:
-            pass
+        except Exception as state_error:
+            logger.error(f"设置关闭状态失败: {state_error}", exc_info=True)
         
         await graceful_shutdown()
 
@@ -258,7 +260,7 @@ app = FastAPI(
 
 # --- 路由定义 ---
 @app.get("/")
-async def root():
+async def root() -> Dict[str, Any]:
     return {
         "status": "running",
         "version": app.version,
@@ -266,7 +268,7 @@ async def root():
     }
 
 @app.get("/health")
-async def health_check():
+async def health_check() -> Dict[str, Any]:
     checks = {
         "status": "unknown",
         "timestamp": time.time(),
@@ -283,16 +285,16 @@ async def health_check():
     try:
         from src.database import check_database_health
         checks["components"]["database"] = await check_database_health()
-    except:
-        pass
+    except Exception as e:
+        logger.error(f"数据库健康检查失败: {e}", exc_info=True)
     
     # 检查交易所
     if hasattr(app.state, 'exchange'):
         try:
             await app.state.exchange.fetch_time()
             checks["components"]["exchange"] = True
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"交易所健康检查失败: {e}", exc_info=True)
     
     # 检查Discord
     if discord_bot and discord_bot.is_ready():
@@ -308,7 +310,7 @@ async def health_check():
     return checks
 
 @app.get("/startup-check")
-async def startup_check():
+async def startup_check() -> Dict[str, Any]:
     checks = {
         "status": "unknown",
         "components": {
@@ -328,14 +330,14 @@ async def startup_check():
             try:
                 await app.state.exchange.fetch_time()
                 checks["components"]["exchange_ready"] = True
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"交易所就绪检查失败: {e}", exc_info=True)
         if discord_bot and discord_bot.is_ready():
             checks["components"]["discord_ready"] = True
         if radar_task and not radar_task.done():
             checks["components"]["radar_ready"] = True
     except Exception as e:
-        logger.error(f"健康检查失败: {e}")
+        logger.error(f"启动检查失败: {e}", exc_info=True)
     
     return {
         "status": "ok" if all(checks["components"].values()) else "degraded",
@@ -343,7 +345,7 @@ async def startup_check():
     }
 
 @app.post("/webhook")
-async def tradingview_webhook(request: Request):
+async def tradingview_webhook(request: Request) -> Dict[str, Any]:
     if not hasattr(CONFIG, 'tv_webhook_secret'):
         raise HTTPException(503, detail="系统未初始化")
     
@@ -380,7 +382,7 @@ async def tradingview_webhook(request: Request):
         return {"status": "processed", "timestamp": time.time()}
         
     except ValueError as e:
-        logger.error(f"信号数据验证失败: {e}")
+        logger.error(f"信号数据验证失败: {e}", exc_info=True)
         raise HTTPException(400, detail=str(e))
     except Exception as e:
         logger.error(f"信号处理失败: {e}", exc_info=True)
