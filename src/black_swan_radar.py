@@ -5,11 +5,10 @@ import logging
 import asyncio
 from datetime import datetime
 from typing import Optional
-import asyncpg
 
 from src.config import CONFIG
 from src.system_state import SystemState
-from src.database import get_db_connection
+from src.database import get_db_connection, db_pool
 
 logger = logging.getLogger("discord_bot")
 
@@ -33,15 +32,7 @@ def get_bot():
 
 async def create_db_pool():
     """创建数据库连接池"""
-    return await asyncpg.create_pool(
-        host=CONFIG.db_host,
-        port=CONFIG.db_port,
-        user=CONFIG.db_user,
-        password=CONFIG.db_password,
-        database=CONFIG.db_name,
-        min_size=5,
-        max_size=20
-    )
+    return db_pool
 
 def has_admin_permissions():
     """权限检查装饰器"""
