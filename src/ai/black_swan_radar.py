@@ -1,6 +1,5 @@
-
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 from .ai_client import AIClient
 
@@ -9,9 +8,9 @@ logger = logging.getLogger(__name__)
 class BlackSwanRadar:
     """黑天鹅雷达模块"""
     
-    def __init__(self, api_key: str):
-        self.ai_client = AIClient(api_key)
-        self.alert_thresholds = {
+    def __init__(self, api_key: str) -> None:
+        self.ai_client: AIClient = AIClient(api_key)
+        self.alert_thresholds: Dict[str, float] = {
             'price_volatility': 0.15,  # 价格波动阈值
             'volume_surge': 2.0,      # 交易量激增阈值
             'funding_rate': 0.01     # 资金费率异常阈值
@@ -61,7 +60,7 @@ class BlackSwanRadar:
         
         return signals
     
-    async def generate_alert_report(self, signals: List[Dict[str, Any]]) -> Dict[str, Any]:
+    async def generate_alert_report(self, signals: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """生成警报报告"""
         if not signals:
             return None
@@ -84,7 +83,7 @@ class BlackSwanRadar:
             'signals': signals
         }
     
-    async def scan_and_alert(self):
+    async def scan_and_alert(self) -> Optional[Dict[str, Any]]:
         """执行扫描并发送警报"""
         logger.info("开始黑天鹅风险扫描...")
         
@@ -105,7 +104,7 @@ class BlackSwanRadar:
         return None
 
 # 黑天鹅雷达启动函数
-async def start_black_swan_radar():
+async def start_black_swan_radar() -> Optional[Dict[str, Any]]:
     """启动黑天鹅雷达的入口函数"""
     from config import CONFIG
     radar = BlackSwanRadar(CONFIG.deepseek_api_key)
@@ -117,4 +116,3 @@ if __name__ == "__main__":
         asyncio.run(start_black_swan_radar())
     except (KeyboardInterrupt, SystemExit):
         logger.info("黑天鹅雷达正在关闭")
-
