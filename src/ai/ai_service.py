@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime
+from typing import Optional, Dict, Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import CONFIG
 from database import set_config
@@ -13,13 +14,13 @@ logger = logging.getLogger("ai_service")
 class AIService:
     """AI服务主类"""
     
-    def __init__(self):
-        self.macro_analyzer = MacroAnalyzer(CONFIG.deepseek_api_key)
-        self.report_generator = ReportGenerator(CONFIG.deepseek_api_key)
-        self.black_swan_radar = BlackSwanRadar(CONFIG.deepseek_api_key)
-        self.scheduler = AsyncIOScheduler(timezone="UTC")
+    def __init__(self) -> None:
+        self.macro_analyzer: MacroAnalyzer = MacroAnalyzer(CONFIG.deepseek_api_key)
+        self.report_generator: ReportGenerator = ReportGenerator(CONFIG.deepseek_api_key)
+        self.black_swan_radar: BlackSwanRadar = BlackSwanRadar(CONFIG.deepseek_api_key)
+        self.scheduler: AsyncIOScheduler = AsyncIOScheduler(timezone="UTC")
     
-    async def send_discord_webhook(self, webhook_url: str, content: str, title: str, color: int):
+    async def send_discord_webhook(self, webhook_url: str, content: str, title: str, color: int) -> None:
         """通过Webhook向Discord发送消息"""
         if not webhook_url:
             logger.error("Discord Webhook URL未设置")
@@ -42,7 +43,7 @@ class AIService:
         except Exception as e:
             logger.error(f"发送Discord消息失败: {e}", exc_info=True)
     
-    async def daily_macro_check(self):
+    async def daily_macro_check(self) -> None:
         """每日宏观检查任务"""
         logger.info("开始每日宏观牛熊状态检查...")
         
@@ -67,7 +68,7 @@ class AIService:
                 15158332  # 红色
             )
     
-    async def generate_periodic_report(self, period: str):
+    async def generate_periodic_report(self, period: str) -> Optional[Dict[str, Any]]:
         """生成周期性报告"""
         report = await self.report_generator.generate_periodic_report(period)
         if report:
@@ -77,8 +78,9 @@ class AIService:
                 report["title"],
                 report["color"]
             )
+        return report
     
-    async def black_swan_scan(self):
+    async def black_swan_scan(self) -> None:
         """黑天鹅扫描任务"""
         logger.info("执行黑天鹅风险扫描...")
         report = await self.black_swan_radar.scan_and_alert()
@@ -91,7 +93,7 @@ class AIService:
                 report['color']
             )
     
-    async def start(self):
+    async def start(self) -> None:
         """启动AI服务"""
         logger.info("AI参谋部 (报告与宏观) 已启动")
         
@@ -138,15 +140,15 @@ class AIService:
         while True:
             await asyncio.sleep(3600)
     
-    async def stop(self):
+    async def stop(self) -> None:
         """停止AI服务"""
         self.scheduler.shutdown()
         logger.info("AI参谋部已关闭")
 
 # 全局服务实例
-ai_service = AIService()
+ai_service: AIService = AIService()
 
-async def start_ai_service():
+async def start_ai_service() -> None:
     """启动AI服务的入口函数"""
     await ai_service.start()
 
