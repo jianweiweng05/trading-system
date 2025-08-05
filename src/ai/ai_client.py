@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import httpx
 
 logger = logging.getLogger(__name__)
@@ -7,11 +7,11 @@ logger = logging.getLogger(__name__)
 class AIClient:
     """AI客户端，用于调用DeepSeek API"""
     
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://api.deepseek.com/v1"
+    def __init__(self, api_key: str) -> None:
+        self.api_key: str = api_key
+        self.base_url: str = "https://api.deepseek.com/v1"
     
-    async def analyze_macro(self, data: Dict[str, str]) -> Dict[str, Any]:
+    async def analyze_macro(self, data: Dict[str, str]) -> Optional[Dict[str, Any]]:
         """分析宏观数据"""
         prompt = f"""
 你是一位顶级的宏观经济学家，为一家大型对冲基金提供每日的加密市场牛熊状态判断。
@@ -60,5 +60,5 @@ class AIClient:
                 result = response.json()
                 return result["choices"][0]["message"]["content"]
         except Exception as e:
-            logger.error(f"AI分析失败: {e}")
+            logger.error(f"AI分析失败: {e}", exc_info=True)
             return None
