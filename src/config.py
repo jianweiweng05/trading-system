@@ -1,5 +1,6 @@
 import logging
-from pydantic import Field
+from typing import Optional
+from pydantic import Field, validator
 from pydantic_settings import BaseSettings
 
 class Config(BaseSettings):
@@ -24,8 +25,8 @@ class Config(BaseSettings):
     database_url: str = Field(default="sqlite+aiosqlite:///./data/trading_system_v7.db", env="DATABASE_URL")
     
     # Discord Webhook配置
-    discord_alert_webhook: str = Field(default="", env="DISCORD_ALERT_WEBHOOK")
-    discord_report_webhook: str = Field(default="", env="DISCORD_REPORT_WEBHOOK")
+    discord_alert_webhook: Optional[str] = Field(default="", env="DISCORD_ALERT_WEBHOOK")
+    discord_report_webhook: Optional[str] = Field(default="", env="DISCORD_REPORT_WEBHOOK")
 
     class Config:
         # 允许额外的字段，这样可以在不修改代码的情况下添加新的配置
@@ -34,19 +35,35 @@ class Config(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # 验证必要的配置项
-        if not self.binance_api_key or not self.binance_api_secret:
-            raise ValueError("币安API密钥未设置")
-        if not self.discord_token:
-            raise ValueError("Discord令牌未设置")
-        if not self.tv_webhook_secret:
-            raise ValueError("TradingView Webhook密钥未设置")
-        if not self.discord_channel_id:
-            raise ValueError("Discord频道ID未设置")
-        if not self.deepseek_api_key:
-            raise ValueError("DeepSeek API密钥未设置")
+    @validator('binance_api_key', 'binance_api_secret', 'discord_token', 
+               'tv_webhook_secret', 'deepseek_api_key')
+    def validate_required_fields(cls, v):
+        """验证必填字段"""
+        if not v:
+            raise ValueError("此字段为必填项")
+        return v
+
+    @validator('leverage')
+    def validate_leverage(cls, v):
+        """验证杠杆值范围"""
+        if not 1 <= v <= 10:
+            raise ValueError("杠杆值必须在1-10之间")
+        return v
+
+    @validator('firepower')
+    def validate_firepower(cls, v):
+        """验证火力值范围"""
+        if not 0 < v <= 1:
+            raise ValueError("火力值必须在0-1之间")
+        return v
+
+    @validator('allocation')
+    def validate_allocation(cls, v):
+        """验证分配模式"""
+        allowed_values = {"conservative", "balanced", "aggressive"}
+        if v not in allowed_values:
+            raise ValueError(f"分配模式必须是以下之一: {allowed_values}")
+        return v
 
 # 创建全局配置实例
 CONFIG = Config()
