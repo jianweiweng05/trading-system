@@ -8,7 +8,7 @@ class Config(BaseSettings):
     binance_api_secret: str = Field(..., env="BINANCE_API_SECRET")
     discord_token: str = Field(..., env="DISCORD_TOKEN")
     tv_webhook_secret: str = Field(..., env="TV_WEBHOOK_SECRET")
-    discord_channel_id: str = Field(..., env="DISCORD_CHANNEL_ID")
+    discord_channel_id: int = Field(..., env="DISCORD_CHANNEL_ID")
     discord_prefix: str = Field(default="!", env="DISCORD_PREFIX")
     run_mode: str = Field(default="simulate", env="RUN_MODE")
     
@@ -19,6 +19,13 @@ class Config(BaseSettings):
     leverage: float = Field(default=5.0, env="LEVERAGE")
     firepower: float = Field(default=0.8, env="FIRESPOWER")
     allocation: str = Field(default="balanced", env="ALLOCATION")
+    
+    # 数据库配置
+    database_url: str = Field(default="sqlite+aiosqlite:///./data/trading_system_v7.db", env="DATABASE_URL")
+    
+    # Discord Webhook配置
+    discord_alert_webhook: str = Field(default="", env="DISCORD_ALERT_WEBHOOK")
+    discord_report_webhook: str = Field(default="", env="DISCORD_REPORT_WEBHOOK")
 
     class Config:
         # 允许额外的字段，这样可以在不修改代码的情况下添加新的配置
