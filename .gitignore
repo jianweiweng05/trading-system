@@ -14,11 +14,18 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
+build/
+dist/
+*.egg-info/
 
-# API密钥
+# 安全文件
 *_key.txt
 *secret*
 *.key
+*.pem
+*.crt
+config.json
+settings.json
 
 # 虚拟环境
 venv/
@@ -48,6 +55,14 @@ Thumbs.db
 # 项目特定
 local_settings.py
 dev_settings.py
+
+# 开发工具
+.ipynb_checkpoints
+.mypy_cache/
+
+# 临时文件
+*.tmp
+*.temp
 
 # Render平台
 .render.yaml
