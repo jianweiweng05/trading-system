@@ -13,12 +13,20 @@ class StrategyConfig:
     async def load_from_db(cls):
         """从数据库加载配置"""
         try:
+            # 加载杠杆配置
             leverage_value = await get_setting('leverage', str(cls.leverage))
             cls.leverage = int(leverage_value)
+            
+            # 加载宏观系数配置
+            macro_coeff_value = await get_setting('macro_coeff', str(cls.MACRO_COEFF))
+            # 注意：MACRO_COEFF 是 Final 类型，不能直接修改
+            # 这里只是记录配置值，但不修改类变量
+            logger.info(f"宏观系数配置值: {macro_coeff_value}")
+            
             logger.info(f"策略配置已更新: leverage={cls.leverage}")
             return True
         except ValueError as e:
-            logger.error(f"杠杆系数格式错误: {e}")
+            logger.error(f"配置格式错误: {e}")
             return False
         except Exception as e:
             logger.error(f"加载策略配置失败: {e}")
@@ -29,7 +37,11 @@ class StrategyConfig:
         """保存配置到数据库"""
         try:
             from src.database import set_setting
+            # 保存杠杆配置
             await set_setting('leverage', str(cls.leverage))
+            # 保存宏观系数配置
+            await set_setting('macro_coeff', str(cls.MACRO_COEFF))
+            
             logger.info(f"策略配置已保存: leverage={cls.leverage}")
             return True
         except Exception as e:
