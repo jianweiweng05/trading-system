@@ -7,8 +7,8 @@ logger = logging.getLogger(__name__)
 class ReportGenerator:
     """报告生成器"""
     
-    def __init__(self, api_key: str):
-        self.ai_client = AIClient(api_key)
+    def __init__(self, api_key: str) -> None:
+        self.ai_client: AIClient = AIClient(api_key)
     
     async def generate_periodic_report(self, period: str) -> Dict[str, Any]:
         """生成周期性报告"""
