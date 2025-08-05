@@ -2,7 +2,8 @@ import logging
 import discord
 from discord import app_commands
 from discord.ext import commands
-import asyncio  # 添加这行
+import asyncio
+from typing import Optional, Dict, Any
 from src.config import CONFIG
 
 # ================= 日志配置 =================
@@ -15,9 +16,9 @@ logger = logging.getLogger("discord_bot")
 
 # ================= Discord Bot 实例 =================
 # 创建一个全局的Discord机器人实例
-_bot_instance = None
+_bot_instance: Optional[commands.Bot] = None
 
-def get_bot():
+def get_bot() -> commands.Bot:
     """获取Discord机器人实例"""
     global _bot_instance
     if _bot_instance is None:
@@ -48,15 +49,15 @@ def get_bot():
         
         # 添加命令日志
         @_bot_instance.before_invoke
-        async def before_any_command(ctx):
+        async def before_any_command(ctx: commands.Context):
             logger.info(f"🟢 用户 {ctx.author} 调用了命令: {ctx.command} 内容: {ctx.message.content}")
 
         @_bot_instance.after_invoke
-        async def after_any_command(ctx):
+        async def after_any_command(ctx: commands.Context):
             logger.info(f"✅ 命令 {ctx.command} 执行完成")
 
         @_bot_instance.event
-        async def on_command_error(ctx, error):
+        async def on_command_error(ctx: commands.Context, error: Exception):
             logger.error(f"❌ 命令 {ctx.command} 出错: {error}")
             if not ctx.response.is_done():
                 await ctx.send(f"⚠️ 命令执行失败: {str(error)}", ephemeral=True)
@@ -67,14 +68,14 @@ def get_bot():
 class TradingCommands(commands.Cog, name="交易系统"):
     """交易系统相关命令"""
     
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.bot.bot_data = {
+        self.bot.bot_data: Dict[str, Any] = {
             'exchange': None,
-            'db_pool': None  # 添加数据库连接池
+            'db_pool': None
         }
     
-    async def check_exchange_status(self):
+    async def check_exchange_status(self) -> bool:
         """检查交易所连接状态"""
         try:
             # 检查是否有交易所数据
@@ -101,7 +102,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
     
     # 旧版文本命令（!status）
     @commands.command(name="status", help="查看系统状态")
-    async def text_status(self, ctx):
+    async def text_status(self, ctx: commands.Context):
         """查看系统状态 - 文本命令版本"""
         try:
             embed = discord.Embed(
@@ -156,7 +157,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
                 await interaction.response.send_message("❌ 获取系统状态失败", ephemeral=True)
 
 # ================= 生命周期管理 =================
-async def initialize_bot(bot):
+async def initialize_bot(bot: commands.Bot):
     """初始化 Discord Bot"""
     try:
         # 初始化数据库连接池
@@ -206,7 +207,7 @@ async def initialize_bot(bot):
         logger.error(f"Discord机器人启动失败: {e}")
         raise
 
-async def stop_bot_services(bot):
+async def stop_bot_services(bot: commands.Bot):
     """关闭 Discord Bot"""
     if bot.is_ready():
         await bot.close()
