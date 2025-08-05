@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Optional, List, AsyncGenerator
+from typing import Optional, List, AsyncGenerator, Union
 from datetime import datetime
 from functools import wraps
 
@@ -13,7 +13,7 @@ from sqlalchemy import (
 
 logger = logging.getLogger(__name__)
 
-def get_db_paths():
+def get_db_paths() -> str:
     """获取安全的数据库路径"""
     # 在Render平台使用项目目录下的data文件夹
     if "RENDER" in os.environ:
@@ -33,7 +33,6 @@ def get_db_paths():
     
     return os.path.join(base_path, "trading_system_v7.db")
 
-# 添加数据库连接池配置
 def create_engine_with_pool(database_url: str) -> AsyncEngine:
     """创建带连接池的引擎"""
     return create_async_engine(
@@ -47,7 +46,6 @@ logger.info(f"数据库路径: {DATABASE_URL}")
 engine = create_engine_with_pool(DATABASE_URL)
 metadata = MetaData()
 
-# 添加数据模型
 Base = declarative_base()
 
 class Trade(Base):
@@ -90,7 +88,6 @@ settings = Table(
     Column('value', Text)
 )
 
-# 添加事务装饰器
 def with_transaction(func):
     """事务装饰器"""
     @wraps(func)
@@ -100,12 +97,12 @@ def with_transaction(func):
                 result = await func(session, *args, **kwargs)
                 await session.commit()
                 return result
-            except Exception:
+            except Exception as e:
                 await session.rollback()
+                logger.error(f"事务执行失败: {str(e)}", exc_info=True)
                 raise
     return wrapper
 
-# 优化数据库连接池
 class DatabaseConnectionPool:
     def __init__(self, engine: AsyncEngine):
         self.engine = engine
@@ -120,13 +117,14 @@ class DatabaseConnectionPool:
         async with self.session_factory() as session:
             try:
                 yield session
-            except Exception:
+            except Exception as e:
                 await session.rollback()
+                logger.error(f"数据库会话错误: {str(e)}", exc_info=True)
                 raise
             finally:
                 await session.close()
 
-async def init_db():
+async def init_db() -> None:
     """初始化数据库"""
     try:
         async with engine.begin() as conn:
@@ -137,7 +135,6 @@ async def init_db():
         logger.error(f"❌ 数据库初始化失败: {str(e)}", exc_info=True)
         raise
 
-# 添加数据库健康检查
 async def check_database_health() -> bool:
     """检查数据库连接状态"""
     try:
@@ -145,10 +142,10 @@ async def check_database_health() -> bool:
             await conn.execute(text("SELECT 1"))
             return True
     except Exception as e:
-        logger.error(f"数据库健康检查失败: {str(e)}")
+        logger.error(f"数据库健康检查失败: {str(e)}", exc_info=True)
         return False
 
-async def get_setting(key: str, default_value: str = None) -> Optional[str]:
+async def get_setting(key: str, default_value: Optional[str] = None) -> Optional[str]:
     """获取设置项"""
     try:
         async with db_pool.get_session() as session:
@@ -167,7 +164,7 @@ async def get_setting(key: str, default_value: str = None) -> Optional[str]:
         logger.warning(f"获取配置项 '{key}' 失败: {str(e)}，返回默认值")
         return default_value
 
-async def set_setting(key: str, value: str):
+async def set_setting(key: str, value: str) -> None:
     """设置设置项"""
     try:
         async with engine.connect() as conn:
@@ -184,7 +181,7 @@ async def set_setting(key: str, value: str):
             await conn.commit()
             logger.info(f"设置项 '{key}' 已更新为: {value}")
     except Exception as e:
-        logger.error(f"设置配置项 '{key}' 失败: {str(e)}")
+        logger.error(f"设置配置项 '{key}' 失败: {str(e)}", exc_info=True)
         raise
 
 @with_transaction
@@ -198,7 +195,7 @@ async def get_open_positions(session: AsyncSession) -> List[Trade]:
         logger.info(f"获取到 {len(positions)} 个未平仓位")
         return positions
     except Exception as e:
-        logger.error(f"获取持仓失败: {str(e)}")
+        logger.error(f"获取持仓失败: {str(e)}", exc_info=True)
         return []
 
 async def log_trade(symbol: str, quantity: float, entry_price: float, 
@@ -220,7 +217,7 @@ async def log_trade(symbol: str, quantity: float, entry_price: float,
             logger.info(f"记录交易: {symbol} {trade_type} {quantity} @ {entry_price} (ID: {trade_id})")
             return trade_id
     except Exception as e:
-        logger.error(f"记录交易失败: {str(e)}")
+        logger.error(f"记录交易失败: {str(e)}", exc_info=True)
         raise
 
 async def close_trade(trade_id: int, exit_price: float) -> bool:
@@ -239,10 +236,10 @@ async def close_trade(trade_id: int, exit_price: float) -> bool:
                 logger.info(f"交易 {trade_id} 已平仓 @ {exit_price}")
             return success
     except Exception as e:
-        logger.error(f"平仓失败: {str(e)}")
+        logger.error(f"平仓失败: {str(e)}", exc_info=True)
         return False
 
-async def get_trade_history(symbol: str = None, limit: int = 10):
+async def get_trade_history(symbol: Optional[str] = None, limit: Optional[int] = 10) -> List[Trade]:
     """获取交易历史"""
     try:
         async with engine.connect() as conn:
@@ -259,10 +256,10 @@ async def get_trade_history(symbol: str = None, limit: int = 10):
             logger.info(f"获取到 {len(trades)} 条交易记录")
             return trades
     except Exception as e:
-        logger.error(f"获取交易历史失败: {str(e)}")
+        logger.error(f"获取交易历史失败: {str(e)}", exc_info=True)
         return []
 
-async def get_position_by_symbol(symbol: str):
+async def get_position_by_symbol(symbol: str) -> Optional[Trade]:
     """根据交易对获取持仓"""
     try:
         async with engine.connect() as conn:
@@ -279,10 +276,10 @@ async def get_position_by_symbol(symbol: str):
                 logger.info(f"未找到 {symbol} 的持仓")
                 return None
     except Exception as e:
-        logger.error(f"获取持仓失败: {str(e)}")
+        logger.error(f"获取持仓失败: {str(e)}", exc_info=True)
         return None
 
-async def get_db_connection():
+async def get_db_connection() -> AsyncGenerator[AsyncSession, None]:
     """获取数据库连接的上下文管理器"""
     async with db_pool.get_session() as session:
         yield session
