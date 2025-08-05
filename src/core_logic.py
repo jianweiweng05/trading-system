@@ -1,7 +1,16 @@
 import logging
 from typing import Dict, Set, Optional
+import re
 
 logger = logging.getLogger(__name__)
+
+# 模块级常量
+MAX_DRAWDOWN_LIMIT = 0.15
+MARKET_ALLOCATIONS = {
+    "BULL": {"BTC": 0.30, "ETH": 0.25, "AVAX": 0.20, "ADA": 0.15, "SOL": 0.10},
+    "BEAR": {"BTC": 0.45, "ETH": 0.25, "AVAX": 0.15, "ADA": 0.10, "SOL": 0.05},
+    "OSC":  {"BTC": 0.40, "ETH": 0.30, "AVAX": 0.15, "ADA": 0.10, "SOL": 0.05}
+}
 
 # --- 第一部分：宏观层 - 战略过滤器 ---
 def get_macro_state(macro_status_code: int, btc_trend: str, eth_trend: str) -> Dict:
@@ -14,6 +23,10 @@ def get_macro_state(macro_status_code: int, btc_trend: str, eth_trend: str) -> D
     # 输入验证
     if not isinstance(macro_status_code, int) or macro_status_code not in (1, 2, 3):
         logger.error(f"Invalid macro_status_code: {macro_status_code}")
+        return {"macro_status": "ERROR", "macro_multiplier": 0.0, "base_leverage": 0.0}
+    
+    if not isinstance(btc_trend, str) or not isinstance(eth_trend, str):
+        logger.error("Trend parameters must be strings")
         return {"macro_status": "ERROR", "macro_multiplier": 0.0, "base_leverage": 0.0}
     
     if btc_trend not in ('L', 'S', 'N') or eth_trend not in ('L', 'S', 'N'):
@@ -40,10 +53,11 @@ def get_macro_state(macro_status_code: int, btc_trend: str, eth_trend: str) -> D
 def parse_signal_name(signal: str) -> Optional[str]:
     """安全解析信号名称"""
     try:
-        parts = signal.split('/')
-        if len(parts) != 2:
+        # 使用正则表达式优化解析
+        match = re.match(r'^([A-Z]{3,4})\d+h/([A-Z]{3,4})USDT$', signal)
+        if not match:
             raise ValueError
-        return f"{parts[0]}{parts[1].replace('USDT', '')}"
+        return f"{match.group(1)}{match.group(2)}"
     except Exception as e:
         logger.warning(f"Failed to parse signal {signal}: {str(e)}")
         return None
@@ -70,42 +84,55 @@ def get_resonance_decision(first_signal: str, combo_signals: Set[str]) -> Dict:
         "SOL10h": 1.0, "ADA4h": 1.0
     }
 
-    # 计算总共振系数 (核心逻辑不变)
+    # 计算总共振系数 (优化过滤无效信号)
     c_r_total = independent_coeffs.get(first_signal_parsed, 0.0)
     
-    for signal in (combo_signals - {first_signal}):
-        parsed = parse_signal_name(signal)
-        if parsed:
-            c_r_total *= enhancement_coeffs.get(parsed, 1.0)
+    # 提前过滤无效信号
+    valid_signals = (parse_signal_name(s) for s in combo_signals - {first_signal})
+    valid_signals = (s for s in valid_signals if s is not None)
+    
+    for signal in valid_signals:
+        c_r_total *= enhancement_coeffs.get(signal, 1.0)
             
     return {"resonance_multiplier": c_r_total}
 
 # --- 第三部分：执行层 - 动态风险仓位计算器 ---
-def get_allocation_percent(macro_status: str, symbol: str) -> float:
-    """
-    根据宏观状态查询资本分配比例 (核心逻辑不变)
-    """
-    allocations = {
-        "BULL": {"BTC": 0.30, "ETH": 0.25, "AVAX": 0.20, "ADA": 0.15, "SOL": 0.10},
-        "BEAR": {"BTC": 0.45, "ETH": 0.25, "AVAX": 0.15, "ADA": 0.10, "SOL": 0.05},
-        "OSC":  {"BTC": 0.40, "ETH": 0.30, "AVAX": 0.15, "ADA": 0.10, "SOL": 0.05}
-    }
-    
-    market_type = next(
+def _extract_market_type(macro_status: str) -> Optional[str]:
+    """从宏观状态字符串中提取市场类型"""
+    return next(
         (m for m in ["BULL", "BEAR", "OSC"] if m in macro_status),
         None
     )
+
+def get_allocation_percent(macro_status: str, symbol: str) -> float:
+    """
+    根据宏观状态查询资本分配比例
+    
+    Args:
+        macro_status: 宏观状态字符串
+        symbol: 交易对符号，如'BTC/USDT'
+        
+    Returns:
+        float: 分配比例，范围0.0-1.0
+    """
+    market_type = _extract_market_type(macro_status)
     if not market_type: 
         return 0.0
     
     coin = symbol.split('/')[0] if '/' in symbol else symbol
-    return allocations.get(market_type, {}).get(coin, 0.0)
+    return MARKET_ALLOCATIONS.get(market_type, {}).get(coin, 0.0)
 
-def get_dynamic_risk_coefficient(current_drawdown: float, max_drawdown_limit: float = 0.15) -> float:
+def get_dynamic_risk_coefficient(current_drawdown: float) -> float:
     """
-    动态风险系数计算 (核心逻辑不变)
+    动态风险系数计算
+    
+    Args:
+        current_drawdown: 当前回撤率
+        
+    Returns:
+        float: 动态风险系数，范围0.1-1.0
     """
-    return max(0.1, 1 - current_drawdown / max_drawdown_limit)
+    return max(0.1, 1 - current_drawdown / MAX_DRAWDOWN_LIMIT)
 
 def calculate_target_position_value(
     account_equity: float, 
@@ -116,7 +143,18 @@ def calculate_target_position_value(
     fixed_leverage: float
 ) -> float:
     """
-    最终目标仓位计算 (核心公式不变)
+    最终目标仓位计算
+    
+    Args:
+        account_equity: 账户权益
+        allocation_percent: 分配比例
+        macro_multiplier: 宏观乘数
+        resonance_multiplier: 共振乘数
+        dynamic_risk_coeff: 动态风险系数
+        fixed_leverage: 固定杠杆倍数
+        
+    Returns:
+        float: 目标仓位价值
     """
     margin_to_use = account_equity * allocation_percent * macro_multiplier * resonance_multiplier * dynamic_risk_coeff
     return margin_to_use * fixed_leverage
@@ -124,7 +162,14 @@ def calculate_target_position_value(
 # --- 第四部分：熔断层 - 轻量版熔断控制 ---
 def check_circuit_breaker(price_fall_4h: float, fear_greed_index: int) -> Optional[Dict]:
     """
-    熔断检查 (修正恐惧贪婪指数逻辑)
+    熔断检查
+    
+    Args:
+        price_fall_4h: 4小时价格跌幅
+        fear_greed_index: 恐惧贪婪指数
+        
+    Returns:
+        Optional[Dict]: 熔断指令字典，如果不需要熔断则返回None
     """
     if not isinstance(price_fall_4h, (int, float)) or not isinstance(fear_greed_index, int):
         logger.error("Invalid circuit breaker inputs")
