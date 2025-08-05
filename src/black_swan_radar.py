@@ -1,369 +1,118 @@
-import discord
-from discord import app_commands
-from discord.ext import commands
 import logging
-import asyncio
+from typing import Dict, Any, List
 from datetime import datetime
-from typing import Optional
+from .ai_client import AIClient
 
-from src.config import CONFIG
-from src.system_state import SystemState
-from src.database import get_db_connection, db_pool
+logger = logging.getLogger(__name__)
 
-logger = logging.getLogger("discord_bot")
-
-# 全局变量
-_bot_instance = None
-
-# 添加可选依赖处理
-try:
-    from src.black_swan_radar import start_radar
-    BLACK_SWAN_AVAILABLE = True
-except ImportError:
-    BLACK_SWAN_AVAILABLE = False
-    logger.warning("黑天鹅雷达模块不可用")
-
-def get_bot():
-    """获取Discord机器人实例"""
-    global _bot_instance
-    if _bot_instance is None:
-        _bot_instance = TradingBot()
-    return _bot_instance
-
-async def create_db_pool():
-    """创建数据库连接池"""
-    return db_pool
-
-def has_admin_permissions():
-    """权限检查装饰器"""
-    def predicate(interaction: discord.Interaction) -> bool:
-        return interaction.user.guild_permissions.administrator
-    return app_commands.check(predicate)
-
-async def initialize_bot(bot):
-    """初始化Discord机器人"""
-    try:
-        # 创建数据库连接池
-        bot.bot_data['db_pool'] = await create_db_pool()
-        
-        # 等待交易所连接建立
-        max_retries = 20
-        retry_delay = 2
-        
-        for i in range(max_retries):
-            if hasattr(bot, 'bot_data') and bot.bot_data.get('exchange'):
-                logger.info("✅ 交易所连接已就绪，启动Discord机器人")
-                break
-            if i < max_retries - 1:
-                logger.info(f"等待交易所连接建立... ({i + 1}/{max_retries})")
-                await asyncio.sleep(retry_delay)
-        else:
-            logger.warning("⚠️ 交易所连接未就绪，Discord机器人仍将启动")
-        
-        # 验证交易所连接
-        if bot.bot_data.get('exchange'):
-            try:
-                await bot.bot_data['exchange'].fetch_time()
-                logger.info("✅ 交易所连接验证成功")
-            except Exception as e:
-                logger.error(f"❌ 交易所连接验证失败: {e}")
-                bot.bot_data['exchange'] = None
-        
-        await bot.start(CONFIG.discord_token)
-    except Exception as e:
-        logger.error(f"Discord机器人初始化失败: {e}")
-        raise
-
-async def stop_bot_services(bot):
-    """停止Discord机器人服务"""
-    try:
-        # 关闭数据库连接池
-        if bot.bot_data.get('db_pool'):
-            await bot.bot_data['db_pool'].close()
-        await bot.close()
-        logger.info("✅ Discord服务已停止")
-    except Exception as e:
-        logger.error(f"停止Discord服务失败: {e}")
-
-class TradingBot(commands.Bot):
-    def __init__(self):
-        intents = discord.Intents.default()
-        intents.message_content = True
-        super().__init__(
-            command_prefix="!",
-            intents=intents,
-            activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name="市场动态"
-            )
-        )
-        self.initialized = False
-        self.bot_data = {
-            'exchange': None,
-            'db_pool': None
+class BlackSwanRadar:
+    """黑天鹅雷达模块"""
+    
+    def __init__(self, api_key: str):
+        self.ai_client = AIClient(api_key)
+        self.alert_thresholds = {
+            'price_volatility': 0.15,  # 价格波动阈值
+            'volume_surge': 2.0,      # 交易量激增阈值
+            'funding_rate': 0.01     # 资金费率异常阈值
         }
+    
+    async def collect_market_data(self) -> Dict[str, Any]:
+        """收集市场数据"""
+        # TODO: 实现实际的市场数据收集逻辑
+        return {
+            'price_volatility': 0.12,
+            'volume_surge': 1.8,
+            'funding_rate': 0.008,
+            'social_sentiment': 'neutral',
+            'news_events': []
+        }
+    
+    async def analyze_risk_signals(self, market_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """分析风险信号"""
+        signals = []
+        
+        # 价格波动分析
+        if market_data['price_volatility'] > self.alert_thresholds['price_volatility']:
+            signals.append({
+                'type': 'price_volatility',
+                'severity': 'high',
+                'description': f"价格波动率异常: {market_data['price_volatility']:.2%}",
+                'timestamp': datetime.utcnow()
+            })
+        
+        # 交易量分析
+        if market_data['volume_surge'] > self.alert_thresholds['volume_surge']:
+            signals.append({
+                'type': 'volume_surge',
+                'severity': 'medium',
+                'description': f"交易量激增: {market_data['volume_surge']:.1f}倍",
+                'timestamp': datetime.utcnow()
+            })
+        
+        # 资金费率分析
+        if abs(market_data['funding_rate']) > self.alert_thresholds['funding_rate']:
+            signals.append({
+                'type': 'funding_rate',
+                'severity': 'medium',
+                'description': f"资金费率异常: {market_data['funding_rate']:.2%}",
+                'timestamp': datetime.utcnow()
+            })
+        
+        return signals
+    
+    async def generate_alert_report(self, signals: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """生成警报报告"""
+        if not signals:
+            return None
+        
+        # 按严重程度排序
+        severity_order = {'high': 3, 'medium': 2, 'low': 1}
+        signals.sort(key=lambda x: severity_order.get(x['severity'], 0), reverse=True)
+        
+        # 生成报告内容
+        report_content = "⚠️ **黑天鹅风险警报** ⚠️\n\n"
+        for signal in signals:
+            emoji = {'high': '🔴', 'medium': '🟡', 'low': '🟢'}.get(signal['severity'], '⚪')
+            report_content += f"{emoji} **{signal['type']}** ({signal['severity']})\n"
+            report_content += f"   {signal['description']}\n\n"
+        
+        return {
+            'title': '🚨 黑天鹅风险警报',
+            'content': report_content,
+            'color': 15158332,  # 红色
+            'signals': signals
+        }
+    
+    async def scan_and_alert(self):
+        """执行扫描并发送警报"""
+        logger.info("开始黑天鹅风险扫描...")
+        
+        # 收集市场数据
+        market_data = await self.collect_market_data()
+        
+        # 分析风险信号
+        signals = await self.analyze_risk_signals(market_data)
+        
+        # 生成警报报告
+        report = await self.generate_alert_report(signals)
+        
+        if report:
+            logger.warning(f"检测到黑天鹅风险信号: {len(signals)}个")
+            return report
+        
+        logger.info("未检测到黑天鹅风险信号")
+        return None
 
-    async def setup_hook(self):
-        """设置机器人启动时的钩子"""
-        # 添加命令Cog
-        await self.add_cog(TradingCommands(self))
-        await self.add_cog(TradingPanel(self))
-        logger.info("✅ 交易系统命令Cog已添加")
-        logger.info("✅ 交易面板Cog已添加")
+# 黑天鹅雷达启动函数
+async def start_black_swan_radar():
+    """启动黑天鹅雷达的入口函数"""
+    from config import CONFIG
+    radar = BlackSwanRadar(CONFIG.deepseek_api_key)
+    return await radar.scan_and_alert()
 
-    async def on_ready(self):
-        """机器人启动完成时的回调"""
-        if not self.initialized:
-            logger.info("🚀 正在启动 Discord Bot")
-            self.initialized = True
-            
-            # 同步斜杠命令
-            try:
-                synced = await self.tree.sync()
-                logger.info(f"✅ 同步 Slash 命令成功: {len(synced)} 个命令")
-            except Exception as e:
-                logger.error(f"❌ 同步 Slash 命令失败: {e}")
-
-            # 发送启动通知
-            if CONFIG.discord_notification_channel:
-                channel = self.get_channel(CONFIG.discord_notification_channel)
-                if channel:
-                    await channel.send("🚀 交易系统已启动")
-                    logger.info("✅ Discord Bot 已发送连接成功消息")
-
-            logger.info(f"✅ Discord Bot 已登录: {self.user}")
-
-class TradingCommands(commands.Cog):
-    """交易命令相关的Cog"""
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-
-    @app_commands.command(name="status", description="查看系统状态")
-    async def slash_status(self, interaction: discord.Interaction):
-        try:
-            # 获取系统状态信息
-            embed = discord.Embed(
-                title="系统状态",
-                description="当前系统运行状态",
-                color=discord.Color.blue()
-            )
-            
-            # 添加状态信息
-            state = await SystemState.get_state()
-            embed.add_field(name="当前状态", value=state, inline=False)
-            
-            # 首次响应
-            await interaction.response.defer(ephemeral=True)  # 先延迟响应
-            
-            # 然后发送实际消息
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            
-            logger.info(f"✅ 用户 {interaction.user.name} 查看了系统状态")
-            
-        except Exception as e:
-            logger.error(f"斜杠状态命令执行失败: {str(e)}", exc_info=True)
-            # 只有在尚未响应的情况下才能发送错误消息
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌获取系统状态失败", ephemeral=True)
-
-    @app_commands.command(name="trading_start", description="启动交易系统")
-    async def slash_trading_start(self, interaction: discord.Interaction):
-        try:
-            await SystemState.set_state("ACTIVE")
-            await interaction.response.send_message("✅ 交易系统已启动", ephemeral=True)
-            logger.info(f"✅ 用户 {interaction.user.name} 启动了交易系统")
-        except Exception as e:
-            logger.error(f"启动交易系统失败: {str(e)}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌启动交易系统失败", ephemeral=True)
-
-    @app_commands.command(name="trading_stop", description="停止交易系统")
-    async def slash_trading_stop(self, interaction: discord.Interaction):
-        try:
-            await SystemState.set_state("STOPPED")
-            await interaction.response.send_message("✅ 交易系统已停止", ephemeral=True)
-            logger.info(f"✅ 用户 {interaction.user.name} 停止了交易系统")
-        except Exception as e:
-            logger.error(f"停止交易系统失败: {str(e)}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌停止交易系统失败", ephemeral=True)
-
-    @app_commands.command(name="emergency_stop", description="紧急停止")
-    @has_admin_permissions()
-    async def slash_emergency_stop(self, interaction: discord.Interaction):
-        try:
-            user_name = interaction.user.name
-            user_id = interaction.user.id
-            logger.warning(f"用户 {user_name} (ID: {user_id}) 触发了紧急停止")
-            
-            await SystemState.set_state("EMERGENCY")
-            
-            # 记录详细操作日志
-            logger.info(f"紧急停止操作完成 - 操作者: {user_name}, 时间: {datetime.now()}")
-            
-            await interaction.response.send_message("⚠️ 已触发紧急停止", ephemeral=True)
-            
-        except Exception as e:
-            logger.error(f"紧急停止失败 - 操作者: {user_name}, 错误: {str(e)}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌紧急停止失败", ephemeral=True)
-
-    @app_commands.command(name="set_risk", description="设置风险级别")
-    @has_admin_permissions()
-    @app_commands.describe(level="风险级别 (LOW/MEDIUM/HIGH)")
-    async def slash_set_risk(self, interaction: discord.Interaction, level: str):
-        try:
-            level = level.upper()
-            if level not in ["LOW", "MEDIUM", "HIGH"]:
-                await interaction.response.send_message("❌ 无效的风险级别", ephemeral=True)
-                return
-            
-            await SystemState.set_risk_level(level)
-            await interaction.response.send_message(f"✅ 风险级别已设置为: {level}", ephemeral=True)
-            logger.info(f"✅ 用户 {interaction.user.name} 设置风险级别为: {level}")
-        except Exception as e:
-            logger.error(f"设置风险级别失败: {str(e)}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌设置风险级别失败", ephemeral=True)
-
-class TradingPanel(commands.Cog):
-    """交易面板相关的Cog"""
-    def __init__(self, bot: commands.Bot):
-        self.bot = bot
-
-    @app_commands.command(name="panel", description="显示交易控制面板")
-    async def slash_panel(self, interaction: discord.Interaction):
-        try:
-            embed = discord.Embed(
-                title="交易控制面板",
-                description="系统控制面板",
-                color=discord.Color.green()
-            )
-            
-            # 添加控制选项
-            state = await SystemState.get_state()
-            embed.add_field(name="当前状态", value=state, inline=False)
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            logger.info(f"✅ 用户 {interaction.user.name} 查看了交易面板")
-            
-        except Exception as e:
-            logger.error(f"显示交易面板失败: {str(e)}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌显示交易面板失败", ephemeral=True)
-
-    @app_commands.command(name="positions", description="查看当前持仓")
-    async def slash_positions(self, interaction: discord.Interaction):
-        try:
-            async with get_db_connection() as db:
-                positions = await db.fetchall("SELECT * FROM positions")
-            
-            embed = discord.Embed(
-                title="当前持仓",
-                description="系统当前持仓情况",
-                color=discord.Color.orange()
-            )
-            
-            for pos in positions:
-                embed.add_field(
-                    name=f"{pos['symbol']} ({pos['side']})",
-                    value=f"数量: {pos['size']}\n入场价: {pos['entry_price']}\n当前盈亏: {pos['pnl']}",
-                    inline=False
-                )
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            logger.info(f"✅ 用户 {interaction.user.name} 查看了持仓信息")
-            
-        except Exception as e:
-            logger.error(f"查看持仓失败: {str(e)}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌查看持仓失败", ephemeral=True)
-
-    @app_commands.command(name="orders", description="查看当前订单")
-    async def slash_orders(self, interaction: discord.Interaction):
-        try:
-            async with get_db_connection() as db:
-                orders = await db.fetchall("SELECT * FROM orders WHERE status = 'OPEN'")
-            
-            embed = discord.Embed(
-                title="当前订单",
-                description="系统当前未完成订单",
-                color=discord.Color.purple()
-            )
-            
-            for order in orders:
-                embed.add_field(
-                    name=f"{order['symbol']} {order['type']}",
-                    value=f"方向: {order['side']}\n价格: {order['price']}\n数量: {order['amount']}",
-                    inline=False
-                )
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            logger.info(f"✅ 用户 {interaction.user.name} 查看了订单信息")
-            
-        except Exception as e:
-            logger.error(f"查看订单失败: {str(e)}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌查看订单失败", ephemeral=True)
-
-    @app_commands.command(name="balance", description="查看账户余额")
-    async def slash_balance(self, interaction: discord.Interaction):
-        try:
-            async with get_db_connection() as db:
-                balance = await db.fetchone("SELECT * FROM balance")
-            
-            embed = discord.Embed(
-                title="账户余额",
-                description="当前账户余额情况",
-                color=discord.Color.gold()
-            )
-            
-            if balance:
-                embed.add_field(name="总资产", value=f"{balance['total_balance']:.2f} USDT", inline=False)
-                embed.add_field(name="可用余额", value=f"{balance['available_balance']:.2f} USDT", inline=False)
-                embed.add_field(name="持仓保证金", value=f"{balance['position_margin']:.2f} USDT", inline=False)
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            logger.info(f"✅ 用户 {interaction.user.name} 查看了账户余额")
-            
-        except Exception as e:
-            logger.error(f"查看余额失败: {str(e)}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌查看余额失败", ephemeral=True)
-
-    @app_commands.command(name="pnl", description="查看盈亏情况")
-    async def slash_pnl(self, interaction: discord.Interaction):
-        try:
-            async with get_db_connection() as db:
-                pnl = await db.fetchone("SELECT * FROM pnl_summary")
-            
-            embed = discord.Embed(
-                title="盈亏统计",
-                description="系统盈亏统计情况",
-                color=discord.Color.dark_green()
-            )
-            
-            if pnl:
-                embed.add_field(name="今日盈亏", value=f"{pnl['daily_pnl']:.2f} USDT", inline=False)
-                embed.add_field(name="总盈亏", value=f"{pnl['total_pnl']:.2f} USDT", inline=False)
-                embed.add_field(name="胜率", value=f"{pnl['win_rate']:.2%}", inline=False)
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            logger.info(f"✅ 用户 {interaction.user.name} 查看了盈亏统计")
-            
-        except Exception as e:
-            logger.error(f"查看盈亏失败: {str(e)}", exc_info=True)
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌查看盈亏失败", ephemeral=True)
-
-async def start_discord_bot():
-    """启动Discord Bot的入口函数"""
-    bot = get_bot()
+if __name__ == "__main__":
+    import asyncio
     try:
-        await initialize_bot(bot)
-    except Exception as e:
-        logger.error(f"Discord Bot 启动失败: {e}")
-        raise
-
-# 添加导出声明
-__all__ = ['get_bot', 'initialize_bot', 'stop_bot_services', 'start_discord_bot']
+        asyncio.run(start_black_swan_radar())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("黑天鹅雷达正在关闭")
