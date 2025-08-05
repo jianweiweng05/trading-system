@@ -129,7 +129,8 @@ async def init_db() -> None:
     try:
         async with engine.begin() as conn:
             logger.info("正在创建数据库表...")
-            await conn.run_sync(metadata.create_all)
+            # 使用 checkfirst=True 避免重复创建表
+            await conn.run_sync(lambda: metadata.create_all(checkfirst=True))
             logger.info("✅ 数据库表创建完成")
     except Exception as e:
         logger.error(f"❌ 数据库初始化失败: {str(e)}", exc_info=True)
