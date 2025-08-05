@@ -284,8 +284,8 @@ async def get_position_by_symbol(symbol: str):
 
 async def get_db_connection():
     """获取数据库连接的上下文管理器"""
-    async with engine.connect() as conn:
-        yield conn
+    async with db_pool.get_session() as session:
+        yield session
 
 # 创建全局连接池实例
 db_pool = DatabaseConnectionPool(engine)
