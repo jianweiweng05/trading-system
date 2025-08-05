@@ -25,14 +25,19 @@ wheels/
 venv/
 ENV/
 env/
+env.bak/
+venv.bak/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 *.swo
+.spyderproject
+.spyproject
+.ropeproject
 
-# Project specific
+# Environment
 .env
 .env.local
 .env.*.local
@@ -41,7 +46,7 @@ env/
 *.log
 logs/
 
-# Local development settings
+# Local development
 local_settings.py
 dev_settings.py
 
@@ -59,7 +64,7 @@ dev_settings.py
 ehthumbs.db
 Thumbs.db
 
-# Test coverage
+# Testing and Coverage
 htmlcov/
 .tox/
 .coverage
@@ -71,45 +76,15 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
-# Jupyter Notebook
+# Jupyter
 .ipynb_checkpoints
 
-# pyenv
+# Version Control
 .python-version
 
-# celery
+# Celery
 celerybeat-schedule
 celerybeat.pid
 
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# Render specific
-.render.yaml
+# SageMath
+<codegeex-cursor></codegeex-cursor>
