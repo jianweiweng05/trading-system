@@ -6,7 +6,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# 【改动1】添加必要的系统依赖
+# 添加必要的系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc python3-dev libffi-dev curl ca-certificates \
     libgomp1  # numpy/pandas计算依赖 \
@@ -17,8 +17,10 @@ RUN pip install --upgrade pip==23.3.2 wheel setuptools
 
 WORKDIR /app
 
+# 【改动】添加禁用C扩展编译的配置文件
+RUN echo "[build]\ncompiler = none\n\n[build_ext]\ndisable = true\n\n[options]\nzip_safe = False" > setup.cfg
+
 COPY requirements.txt .
-# 【改动2】移除固定版本，使用requirements.txt中的版本
 RUN pip install --user \
     cython && \
     pip install --user --no-cache-dir -r requirements.txt
@@ -26,7 +28,7 @@ RUN pip install --user \
 # ===== 生产阶段 =====
 FROM python:3.10-slim
 
-# 【改动3】添加运行时必要的系统依赖
+# 添加运行时必要的系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates \
     libgomp1 \
