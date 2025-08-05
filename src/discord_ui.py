@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 from discord.ui import Button, Select, View, Modal, TextInput
 import logging
+from typing import Optional, Dict, Any
 from src.config import CONFIG
 
 logger = logging.getLogger(__name__)
@@ -11,7 +12,7 @@ class TradingModeView(View):
     """交易模式切换视图"""
     def __init__(self):
         super().__init__(timeout=None)
-        self.current_mode = CONFIG.run_mode
+        self.current_mode: str = CONFIG.run_mode
         
         # 创建模拟交易按钮
         self.sim_button = Button(
@@ -60,7 +61,7 @@ class TradingModeView(View):
             self.current_mode = "simulate"
             
         except Exception as e:
-            logger.error(f"切换到模拟交易模式失败: {e}")
+            logger.error(f"切换到模拟交易模式失败: {e}", exc_info=True)
             await interaction.followup.send("切换失败，请稍后重试", ephemeral=True)
     
     async def switch_to_live(self, interaction: discord.Interaction):
@@ -123,7 +124,7 @@ class ConfirmView(View):
             logger.info(f"用户 {interaction.user} 切换到实盘交易模式")
             
         except Exception as e:
-            logger.error(f"切换到实盘交易模式失败: {e}")
+            logger.error(f"切换到实盘交易模式失败: {e}", exc_info=True)
             await interaction.response.send_message("切换失败，请稍后重试", ephemeral=True)
     
     async def cancel_switch(self, interaction: discord.Interaction):
@@ -140,7 +141,7 @@ class ParameterControlView(View):
             placeholder="选择杠杆系数",
             options=[
                 discord.SelectOption(label=f"{x}x", value=str(x))
-                for x in [2.5, 5.0, 10.0, 20.0]  # 示例值，实际应从配置获取
+                for x in [2.5, 5.0, 10.0, 20.0]
             ],
             custom_id="leverage_select"
         )
@@ -149,7 +150,7 @@ class ParameterControlView(View):
         
         # 火力系数输入框
         self.firepower_button = Button(
-            label=f"火力系数: {getattr(CONFIG, 'firepower', 0.8)}",  # 使用getattr获取默认值
+            label=f"火力系数: {getattr(CONFIG, 'firepower', 0.8)}",
             style=discord.ButtonStyle.blurple,
             custom_id="firepower_input"
         )
@@ -194,7 +195,7 @@ class ParameterControlView(View):
             logger.info(f"用户 {interaction.user} 更新杠杆系数为 {new_leverage}")
             
         except Exception as e:
-            logger.error(f"更新杠杆系数失败: {e}")
+            logger.error(f"更新杠杆系数失败: {e}", exc_info=True)
             await interaction.followup.send("更新失败，请稍后重试", ephemeral=True)
     
     async def input_firepower(self, interaction: discord.Interaction):
@@ -228,7 +229,7 @@ class ParameterControlView(View):
             logger.info(f"用户 {interaction.user} 更新资本分配为 {allocation}")
             
         except Exception as e:
-            logger.error(f"更新资本分配失败: {e}")
+            logger.error(f"更新资本分配失败: {e}", exc_info=True)
             await interaction.followup.send("更新失败，请稍后重试", ephemeral=True)
 
 class FirepowerModal(Modal, title="设置火力系数"):
@@ -260,7 +261,7 @@ class FirepowerModal(Modal, title="设置火力系数"):
         except ValueError:
             await interaction.response.send_message("请输入有效的数字", ephemeral=True)
         except Exception as e:
-            logger.error(f"更新火力系数失败: {e}")
+            logger.error(f"更新火力系数失败: {e}", exc_info=True)
             await interaction.response.send_message("更新失败，请稍后重试", ephemeral=True)
 
 class QuickActionsView(View):
@@ -330,7 +331,7 @@ class QuickActionsView(View):
             logger.info(f"用户 {interaction.user} 刷新了系统状态")
             
         except Exception as e:
-            logger.error(f"刷新状态失败: {e}")
+            logger.error(f"刷新状态失败: {e}", exc_info=True)
             await interaction.response.send_message("刷新失败，请稍后重试", ephemeral=True)
     
     async def view_positions(self, interaction: discord.Interaction):
@@ -350,7 +351,7 @@ class QuickActionsView(View):
             logger.info(f"用户 {interaction.user} 查看了持仓信息")
             
         except Exception as e:
-            logger.error(f"查看持仓失败: {e}")
+            logger.error(f"查看持仓失败: {e}", exc_info=True)
             await interaction.response.send_message("查看持仓失败，请稍后重试", ephemeral=True)
     
     async def save_config(self, interaction: discord.Interaction):
@@ -366,7 +367,7 @@ class QuickActionsView(View):
             logger.info(f"用户 {interaction.user} 保存了配置")
             
         except Exception as e:
-            logger.error(f"保存配置失败: {e}")
+            logger.error(f"保存配置失败: {e}", exc_info=True)
             await interaction.response.send_message("❌ 保存失败，请稍后重试", ephemeral=True)
     
     async def view_logs(self, interaction: discord.Interaction):
@@ -393,13 +394,13 @@ class QuickActionsView(View):
             logger.info(f"用户 {interaction.user} 查看了系统日志")
             
         except Exception as e:
-            logger.error(f"查看日志失败: {e}")
+            logger.error(f"查看日志失败: {e}", exc_info=True)
             await interaction.response.send_message("查看日志失败，请稍后重试", ephemeral=True)
 
 class TradingDashboard(commands.Cog, name="交易面板"):
     """交易系统控制面板"""
     
-    def __init__(self, bot):
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
     
     @app_commands.command(name="dashboard", description="打开交易控制面板")
@@ -428,7 +429,7 @@ class TradingDashboard(commands.Cog, name="交易面板"):
             )
             
         except Exception as e:
-            logger.error(f"打开交易控制面板失败: {e}")
+            logger.error(f"打开交易控制面板失败: {e}", exc_info=True)
             await interaction.response.send_message("❌ 打开面板失败，请稍后重试", ephemeral=True)
 
     @app_commands.command(name="parameters", description="调整交易参数")
@@ -467,7 +468,7 @@ class TradingDashboard(commands.Cog, name="交易面板"):
             )
             
         except Exception as e:
-            logger.error(f"打开参数设置面板失败: {e}")
+            logger.error(f"打开参数设置面板失败: {e}", exc_info=True)
             await interaction.response.send_message("❌ 打开参数面板失败，请稍后重试", ephemeral=True)
 
     @app_commands.command(name="quick_actions", description="快速操作")
@@ -489,5 +490,5 @@ class TradingDashboard(commands.Cog, name="交易面板"):
             )
             
         except Exception as e:
-            logger.error(f"打开快速操作面板失败: {e}")
+            logger.error(f"打开快速操作面板失败: {e}", exc_info=True)
             await interaction.response.send_message("❌ 打开快速操作面板失败，请稍后重试", ephemeral=True)
