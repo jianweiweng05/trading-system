@@ -87,4 +87,16 @@ celerybeat-schedule
 celerybeat.pid
 
 # SageMath
-<codegeex-cursor></codegeex-cursor>
+*.sage.py
+
+# Documentation
+docs/_build/
+/site
+
+# Type checker
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Render
+.render.yaml
