@@ -12,7 +12,7 @@ class SystemState:
     _instance = None
     _state: str = "STARTING"  # 初始状态
     _lock = asyncio.Lock()
-    _alert_callback: Callable[[str, str], Awaitable[None]] = None
+    _alert_callback: Callable[[str, str, object], Awaitable[None]] = None
     
     def __new__(cls):
         if cls._instance is None:
@@ -77,10 +77,10 @@ class SystemState:
     @classmethod
     async def get_state_info(cls) -> dict:
         """获取当前状态的详细信息"""
-        async with cls._lock:
-            return {
-                "state": cls._state,
-                "is_active": await cls.is_active(),
-                "is_normal": await cls.is_normal(),
-                "is_emergency": await cls.is_emergency()
-            }
+        current_state = await cls.get_state()
+        return {
+            "state": current_state,
+            "is_active": current_state in ["ACTIVE"],
+            "is_normal": current_state in ["ACTIVE", "PAUSED", "HALTED"],
+            "is_emergency": current_state == "EMERGENCY"
+        }
