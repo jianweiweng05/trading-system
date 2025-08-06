@@ -1,6 +1,7 @@
 import logging
 from typing import Dict, Any, Optional
 import httpx
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,20 @@ class AIClient:
                 )
                 response.raise_for_status()
                 result = response.json()
-                return result["choices"][0]["message"]["content"]
+                content = result["choices"][0]["message"]["content"]
+                
+                # 解析返回的JSON内容
+                parsed_result = json.loads(content)
+                
+                # 转换为系统需要的格式
+                return {
+                    "market_season": "BULL" if parsed_result["bull_bear_status"] == "牛市" else 
+                                   "BEAR" if parsed_result["bull_bear_status"] == "熊市" else 
+                                   "NEUTRAL",
+                    "confidence": parsed_result["composite_index"],
+                    "reason": parsed_result["reasoning"],
+                    "status_changed": parsed_result["status_changed"]
+                }
         except Exception as e:
             logger.error(f"AI分析失败: {e}", exc_info=True)
             return None
