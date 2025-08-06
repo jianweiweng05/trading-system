@@ -201,7 +201,7 @@ async def lifespan(app: FastAPI):
         app.state.exchange = exchange
         
         # --- 新增内容：实例化 MacroAnalyzer 并挂载到 app.state ---
-        app.state.macro_analyzer = MacroAnalyzer(api_key=CONFIG.openai_api_key) # 假设您的API Key在CONFIG中
+        app.state.macro_analyzer = MacroAnalyzer(api_key=CONFIG.openai_api_key)
         logger.info("✅ 宏观分析器已实例化")
         
         # 2. 并行启动 Discord Bot 和黑天鹅雷达 (无变动)
@@ -220,7 +220,7 @@ async def lifespan(app: FastAPI):
             "黑天鹅雷达"
         )
         
-        # 3. 立即设置系统状态，不等待其他任务 (无变动)
+        # 3. 立即设置系统状态，不等待其他任务 (有修改)
         await SystemState.set_state("ACTIVE")
         startup_complete = True
         logger.info("🚀 系统启动完成 (状态: ACTIVE)")
@@ -355,18 +355,20 @@ async def tradingview_webhook(request: Request) -> Dict[str, Any]:
         
         macro_decision = await app.state.macro_analyzer.get_macro_decision()
         logger.info(f"宏观决策结果: {macro_decision}")
-
+        
         # 2. 检查并执行清场指令
         if macro_decision["liquidation_signal"]:
             signal_reason = macro_decision["reason"]
             if macro_decision["liquidation_signal"] == "LIQUIDATE_ALL_LONGS":
                 logger.warning(f"宏观清场指令触发: {signal_reason}")
-                # await liquidate_all_long_positions(app.state.exchange) # 调用平仓函数
+                # 这里应该调用实际的平仓函数
+                # await liquidate_all_positions(app.state.exchange)
                 return {"status": "liquidated_longs", "reason": signal_reason}
                 
             elif macro_decision["liquidation_signal"] == "LIQUIDATE_ALL_SHORTS":
                 logger.warning(f"宏观清场指令触发: {signal_reason}")
-                # await liquidate_all_short_positions(app.state.exchange) # 调用平仓函数
+                # 这里应该调用实际的平仓函数
+                # await liquidate_all_shorts(app.state.exchange)
                 return {"status": "liquidated_shorts", "reason": signal_reason}
         
         # 3. 如果没有清场指令，才继续处理交易信号
@@ -384,17 +386,23 @@ async def tradingview_webhook(request: Request) -> Dict[str, Any]:
             logger.warning(f"系统未激活，拒绝处理信号 - 当前状态: {current_state}")
             raise HTTPException(503, detail=f"系统未激活 ({current_state})")
         
-        # 在这里，您将使用 macro_decision["current_season"] 和其他宏观参数
-        # 去调用您的仓位计算和交易执行逻辑
-        # 例如:
-        # await process_trade_signal(
-        #     signal_data, 
-        #     macro_decision, 
-        #     app.state.exchange
-        # )
-        
         # --- 核心修改区域结束 ---
         
+        # 在这里，您将使用 macro_decision 的参数去调用您的仓位计算和交易执行逻辑
+        # 例如:
+        # from src.core_trading_logic import calculate_target_position_value
+        # position_value = calculate_target_position_value(
+        #     account_equity=10000.0,
+        #     allocation_percent=0.1,
+        #     macro_decision=macro_decision,
+        #     resonance_multiplier=1.0,
+        #     dynamic_risk_coeff=0.8,
+        #     fixed_leverage=2.0
+        # )
+        # logger.info(f"计算目标仓位: {position_value}")
+        # await execute_trade(...)
+        
+        # 由于您要求不要写代码，这里只返回一个占位符
         return {"status": "processed", "timestamp": time.time()}
         
     except ValueError as e:
