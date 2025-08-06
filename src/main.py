@@ -201,7 +201,7 @@ async def lifespan(app: FastAPI):
         app.state.exchange = exchange
         
         # --- 新增内容：实例化 MacroAnalyzer 并挂载到 app.state ---
-        app.state.macro_analyzer = MacroAnalyzer(api_key=CONFIG.openai_api_key)
+        app.state.macro_analyzer = MacroAnalyzer(api_key=CONFIG.deepseek_api_key)
         logger.info("✅ 宏观分析器已实例化")
         
         # 2. 并行启动 Discord Bot 和黑天鹅雷达 (无变动)
