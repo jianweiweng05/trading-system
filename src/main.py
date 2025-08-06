@@ -34,6 +34,7 @@ discord_bot: Optional[Any] = None
 radar_task: Optional[asyncio.Task] = None
 startup_complete: bool = False
 exchange_monitor_task: Optional[asyncio.Task] = None
+exchange_status_changed = asyncio.Event()  # 新增：交易所连接状态变更事件
 
 # --- 辅助函数 (无变动) ---
 def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
@@ -130,7 +131,7 @@ async def check_system_status() -> Dict[str, Any]:
     
     return status
 
-# --- 交易所连接监控函数 (新增) ---
+# --- 交易所连接监控函数 (修改) ---
 async def monitor_exchange_connection():
     """监控交易所连接状态并在断开时尝试重连"""
     global exchange_monitor_task
@@ -165,11 +166,17 @@ async def monitor_exchange_connection():
                     # 更新Discord Bot中的交易所连接
                     if discord_bot and hasattr(discord_bot, 'bot_data'):
                         discord_bot.bot_data['exchange'] = exchange
+                        # 触发状态变更事件
+                        exchange_status_changed.set()
+                        exchange_status_changed.clear()
                     
                     break
                 except Exception as e:
                     if i == max_retries - 1:
                         logger.error(f"❌ 交易所重连失败: {e}")
+                        # 触发状态变更事件
+                        exchange_status_changed.set()
+                        exchange_status_changed.clear()
                     else:
                         logger.warning(f"交易所重试 {i + 1}/{max_retries}")
             
@@ -177,6 +184,29 @@ async def monitor_exchange_connection():
             
         except Exception as e:
             logger.error(f"交易所连接监控出错: {e}")
+            # 触发状态变更事件
+            exchange_status_changed.set()
+            exchange_status_changed.clear()
+            await asyncio.sleep(30)
+
+# --- 交易所连接状态更新任务 (新增) ---
+async def update_discord_exchange_status():
+    """更新Discord Bot中的交易所连接状态"""
+    while True:
+        try:
+            # 等待状态变更事件
+            await exchange_status_changed.wait()
+            
+            # 等待一段时间避免频繁更新
+            await asyncio.sleep(1)
+            
+            # 更新Discord Bot中的交易所连接状态
+            if discord_bot and hasattr(discord_bot, 'bot_data'):
+                discord_bot.bot_data['exchange'] = getattr(app.state, 'exchange', None)
+                logger.info("✅ 已更新Discord Bot中的交易所连接状态")
+            
+        except Exception as e:
+            logger.error(f"更新Discord交易所状态失败: {e}")
             await asyncio.sleep(30)
 
 # --- 优雅关闭处理函数 (有修改) ---
@@ -272,11 +302,15 @@ async def lifespan(app: FastAPI):
             "黑天鹅雷达"
         )
         
-        # 3. 启动交易所连接监控任务 (新增)
+        # 3. 启动交易所连接监控任务 (修改)
         exchange_monitor_task = asyncio.create_task(monitor_exchange_connection())
         logger.info("✅ 交易所连接监控任务已创建")
         
-        # 4. 立即设置系统状态，不等待其他任务 (有修改)
+        # 4. 启动交易所状态更新任务 (新增)
+        status_update_task = asyncio.create_task(update_discord_exchange_status())
+        logger.info("✅ 交易所状态更新任务已创建")
+        
+        # 5. 立即设置系统状态，不等待其他任务 (有修改)
         await SystemState.set_state("ACTIVE")
         startup_complete = True
         logger.info("🚀 系统启动完成 (状态: ACTIVE)")
