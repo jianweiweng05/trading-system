@@ -177,6 +177,7 @@ async def lifespan(app: FastAPI):
         
         # 1. 并行初始化数据库和交易所连接
         from src.database import init_db
+        # 使用 asyncio.gather 来并行执行，避免阻塞主流程
         db_task = asyncio.create_task(init_db())
         
         exchange = binance({
