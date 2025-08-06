@@ -112,7 +112,8 @@ async def init_db() -> None:
         logger.info("正在创建数据库表...")
         # 使用同步方式创建表，避免异步引擎的 MetaData 绑定问题
         from sqlalchemy import create_engine
-        sync_engine = create_engine(DATABASE_URL.replace("aiosqlite", "sqlite"))
+        # 使用 pysqlite 驱动，避免插件加载问题
+        sync_engine = create_engine(DATABASE_URL.replace("aiosqlite", "pysqlite"))
         Base.metadata.create_all(sync_engine)
         logger.info("✅ 数据库表创建完成")
     except Exception as e:
