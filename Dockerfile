@@ -1,5 +1,5 @@
 # ===== 构建阶段 =====
-FROM python:3.10-slim as builder
+FROM python:3.11-slim as builder
 
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -26,7 +26,7 @@ RUN pip install --user \
     pip install --user --no-cache-dir -r requirements.txt
 
 # ===== 生产阶段 =====
-FROM python:3.10-slim
+FROM python:3.11-slim
 
 # 添加运行时必要的系统依赖
 RUN apt-get update && apt-get install -y --no-install-recommends \
