@@ -43,6 +43,7 @@ def create_engine_with_pool(database_url: str) -> AsyncEngine:
 DATABASE_URL = f"sqlite+aiosqlite:///{get_db_paths()}"
 logger.info(f"数据库路径: {DATABASE_URL}")
 
+# 异步引擎用于业务操作
 engine = create_engine_with_pool(DATABASE_URL)
 metadata = MetaData()
 
@@ -110,7 +111,9 @@ async def init_db() -> None:
     try:
         logger.info("正在创建数据库表...")
         # 使用同步方式创建表，避免异步引擎的 MetaData 绑定问题
-        Base.metadata.create_all(engine)
+        from sqlalchemy import create_engine
+        sync_engine = create_engine(DATABASE_URL.replace("aiosqlite", "sqlite"))
+        Base.metadata.create_all(sync_engine)
         logger.info("✅ 数据库表创建完成")
     except Exception as e:
         logger.error(f"❌ 数据库初始化失败: {str(e)}", exc_info=True)
