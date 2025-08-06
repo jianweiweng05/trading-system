@@ -74,58 +74,34 @@ class TradingCommands(commands.Cog, name="交易系统"):
             'exchange': None,
             'db_pool': None
         }
-        # 添加交易所连接状态监控任务
-        self.exchange_monitor_task: Optional[asyncio.Task] = None
-        self.exchange_status_changed = asyncio.Event()
     
     async def check_exchange_status(self) -> bool:
         """检查交易所连接状态"""
         try:
             # 检查是否有交易所数据
             if not hasattr(self.bot, 'bot_data') or 'exchange' not in self.bot.bot_data:
+                logger.debug("❌ 交易所数据不存在")
                 return False
             
             exchange = self.bot.bot_data['exchange']
             
             # 检查交易所对象是否有效
             if not exchange:
+                logger.debug("❌ 交易所对象无效")
                 return False
             
             # 尝试获取服务器时间来验证连接
             try:
                 await exchange.fetch_time()
+                logger.debug("✅ 交易所连接验证成功")
                 return True
             except Exception as e:
-                logger.error(f"验证交易所连接失败: {e}")
+                logger.error(f"❌ 验证交易所连接失败: {e}")
                 return False
                 
         except Exception as e:
-            logger.error(f"检查交易所状态失败: {e}")
+            logger.error(f"❌ 检查交易所状态失败: {e}")
             return False
-    
-    async def monitor_exchange_status(self):
-        """监控交易所连接状态"""
-        while True:
-            try:
-                # 等待状态变更事件
-                await self.exchange_status_changed.wait()
-                
-                # 等待一段时间避免频繁更新
-                await asyncio.sleep(1)
-                
-                # 清除事件状态
-                self.exchange_status_changed.clear()
-                
-                # 记录状态变更
-                logger.info("🔄 交易所连接状态已更新")
-                
-            except Exception as e:
-                logger.error(f"监控交易所状态失败: {e}")
-                await asyncio.sleep(30)
-    
-    def update_exchange_status(self):
-        """触发交易所连接状态更新"""
-        self.exchange_status_changed.set()
     
     # 旧版文本命令（!status）
     @commands.command(name="status", help="查看系统状态")
@@ -232,10 +208,6 @@ async def initialize_bot(bot: commands.Bot):
         await bot.add_cog(trading_cog)
         logger.info("✅ 交易系统命令Cog已添加")
         
-        # 启动交易所状态监控任务
-        trading_cog.exchange_monitor_task = asyncio.create_task(trading_cog.monitor_exchange_status())
-        logger.info("✅ 交易所状态监控任务已创建")
-        
         # 添加交易面板Cog
         from src.discord_ui import TradingDashboard
         await bot.add_cog(TradingDashboard(bot))
@@ -252,14 +224,6 @@ async def initialize_bot(bot: commands.Bot):
 async def stop_bot_services(bot: commands.Bot):
     """关闭 Discord Bot"""
     if bot.is_ready():
-        # 停止交易所状态监控任务
-        for cog in bot.cogs.values():
-            if isinstance(cog, TradingCommands):
-                if cog.exchange_monitor_task:
-                    cog.exchange_monitor_task.cancel()
-                    logger.info("🛑 交易所状态监控任务已停止")
-                break
-        
         await bot.close()
         logger.info("🛑 Discord Bot 已关闭")
 
