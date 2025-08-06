@@ -4,7 +4,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# 模块级常量
+# 模块级常量 (保持不变)
 MAX_DRAWDOWN_LIMIT = 0.15
 MARKET_ALLOCATIONS = {
     "BULL": {"BTC": 0.30, "ETH": 0.25, "AVAX": 0.20, "ADA": 0.15, "SOL": 0.10},
@@ -20,7 +20,7 @@ def get_macro_state(macro_status_code: int, btc_trend: str, eth_trend: str) -> D
         macro_status_code: 1(牛), 2(熊), 3(震荡)
         btc_trend/eth_trend: 'L'(多头), 'S'(空头), 'N'(中性)
     """
-    # 输入验证
+    # 输入验证 (保持不变)
     if not isinstance(macro_status_code, int) or macro_status_code not in (1, 2, 3):
         logger.error(f"Invalid macro_status_code: {macro_status_code}")
         return {"macro_status": "ERROR", "macro_multiplier": 0.0, "base_leverage": 0.0}
@@ -33,7 +33,7 @@ def get_macro_state(macro_status_code: int, btc_trend: str, eth_trend: str) -> D
         logger.error(f"Invalid trend values - BTC:{btc_trend}, ETH:{eth_trend}")
         return {"macro_status": "ERROR", "macro_multiplier": 0.0, "base_leverage": 0.0}
 
-    # 核心逻辑保持不变
+    # 核心逻辑 (保持不变)
     if macro_status_code == 1 and btc_trend == 'L':
         status, c_m, l_base = "BULL_ACTIVE", 1.5, 3.0
     elif macro_status_code == 2 and btc_trend == 'S' and eth_trend == 'S':
@@ -137,7 +137,8 @@ def get_dynamic_risk_coefficient(current_drawdown: float) -> float:
 def calculate_target_position_value(
     account_equity: float, 
     allocation_percent: float, 
-    macro_multiplier: float,
+    # 修改参数名以匹配新的决策流程
+    macro_decision: Dict[str, Any],
     resonance_multiplier: float,
     dynamic_risk_coeff: float,
     fixed_leverage: float
@@ -148,7 +149,7 @@ def calculate_target_position_value(
     Args:
         account_equity: 账户权益
         allocation_percent: 分配比例
-        macro_multiplier: 宏观乘数
+        macro_decision: 宏观决策字典
         resonance_multiplier: 共振乘数
         dynamic_risk_coeff: 动态风险系数
         fixed_leverage: 固定杠杆倍数
@@ -156,6 +157,10 @@ def calculate_target_position_value(
     Returns:
         float: 目标仓位价值
     """
+    # 从宏观决策中提取必要参数
+    macro_multiplier = macro_decision.get("macro_multiplier", 0.0)
+    base_leverage = macro_decision.get("base_leverage", 0.0)
+    
     margin_to_use = account_equity * allocation_percent * macro_multiplier * resonance_multiplier * dynamic_risk_coeff
     return margin_to_use * fixed_leverage
 
