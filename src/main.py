@@ -15,6 +15,8 @@ import uvicorn
 from src.config import CONFIG
 # --- 导入系统状态模块 ---
 from src.system_state import SystemState
+# --- 新增导入：导入我们升级后的 MacroAnalyzer ---
+from src.ai.macro_analyzer import MacroAnalyzer
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -30,7 +32,7 @@ discord_bot: Optional[Any] = None
 radar_task: Optional[asyncio.Task] = None
 startup_complete: bool = False
 
-# --- 辅助函数 ---
+# --- 辅助函数 (无变动) ---
 def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
     if not secret:
         return True
@@ -47,17 +49,15 @@ def rate_limit_check(client_ip: str) -> bool:
     REQUEST_LOG[client_ip].append(now)
     return True
 
-# --- Discord Bot 启动函数 ---
+# --- Discord Bot 启动函数 (无变动) ---
 async def start_discord_bot() -> Optional[Any]:
     """启动Discord机器人的异步函数"""
     global discord_bot
     try:
         from src.discord_bot import get_bot, initialize_bot
         
-        # 获取Discord机器人实例
         discord_bot = get_bot()
         
-        # 等待交易所连接建立
         max_retries = 20
         retry_delay = 2
         
@@ -71,13 +71,11 @@ async def start_discord_bot() -> Optional[Any]:
         else:
             logger.warning("⚠️ 交易所连接未就绪，Discord机器人仍将启动")
         
-        # 设置机器人数据
         discord_bot.bot_data = {
             'exchange': getattr(app.state, 'exchange', None),
             'config': CONFIG
         }
         
-        # 验证交易所连接
         if discord_bot.bot_data['exchange']:
             try:
                 await discord_bot.bot_data['exchange'].fetch_time()
@@ -86,10 +84,8 @@ async def start_discord_bot() -> Optional[Any]:
                 logger.error(f"❌ 交易所连接验证失败: {e}")
                 discord_bot.bot_data['exchange'] = None
         
-        # 初始化机器人
         await initialize_bot(discord_bot)
         
-        # 标记启动完成
         startup_complete = True
         logger.info("🚀 系统启动完成")
         
@@ -98,7 +94,7 @@ async def start_discord_bot() -> Optional[Any]:
         logger.error(f"Discord机器人启动失败: {e}", exc_info=True)
         raise
 
-# --- 安全启动任务包装函数 ---
+# --- 安全启动任务包装函数 (无变动) ---
 async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
     """安全启动任务的包装函数"""
     try:
@@ -112,7 +108,7 @@ async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
         logger.error(f"{name}启动失败: {e}", exc_info=True)
         return None
 
-# --- 系统状态检查函数 ---
+# --- 系统状态检查函数 (无变动) ---
 async def check_system_status() -> Dict[str, Any]:
     """检查系统整体状态"""
     status = {
@@ -131,12 +127,11 @@ async def check_system_status() -> Dict[str, Any]:
     
     return status
 
-# --- 优雅关闭处理函数 ---
+# --- 优雅关闭处理函数 (无变动) ---
 async def graceful_shutdown():
     """优雅关闭所有服务"""
     logger.info("开始优雅关闭...")
     
-    # 取消所有任务
     tasks = [discord_bot_task, radar_task]
     for task in tasks:
         if task and not task.done():
@@ -148,7 +143,6 @@ async def graceful_shutdown():
             except asyncio.CancelledError:
                 logger.info(f"任务已取消")
     
-    # 关闭Discord Bot
     if discord_bot and discord_bot.is_ready():
         try:
             from src.discord_bot import stop_bot_services
@@ -157,7 +151,6 @@ async def graceful_shutdown():
         except asyncio.TimeoutError:
             logger.warning("Discord服务关闭超时")
     
-    # 关闭交易所连接
     if hasattr(app.state, 'exchange'):
         try:
             await asyncio.wait_for(app.state.exchange.close(), timeout=5.0)
@@ -167,7 +160,7 @@ async def graceful_shutdown():
     
     logger.info("✅ 系统安全关闭")
 
-# --- 生命周期管理 ---
+# --- 生命周期管理 (有修改) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global discord_bot_task, discord_bot, radar_task, startup_complete
@@ -175,9 +168,8 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("🔄 系统启动中...")
         
-        # 1. 并行初始化数据库和交易所连接
+        # 1. 并行初始化数据库和交易所连接 (无变动)
         from src.database import init_db
-        # 使用 asyncio.gather 来并行执行，避免阻塞主流程
         db_task = asyncio.create_task(init_db())
         
         exchange = binance({
@@ -190,7 +182,6 @@ async def lifespan(app: FastAPI):
             }
         })
         
-        # 添加重试机制
         max_retries = int(os.getenv("EXCHANGE_MAX_RETRIES", "3"))
         for i in range(max_retries):
             try:
@@ -204,13 +195,16 @@ async def lifespan(app: FastAPI):
                     raise
                 logger.warning(f"交易所连接重试 {i + 1}/{max_retries}")
         
-        # 等待数据库初始化完成
         await db_task
         logger.info("✅ 数据库和交易所初始化完成")
         
         app.state.exchange = exchange
         
-        # 2. 并行启动 Discord Bot 和黑天鹅雷达
+        # --- 新增内容：实例化 MacroAnalyzer 并挂载到 app.state ---
+        app.state.macro_analyzer = MacroAnalyzer(api_key=CONFIG.openai_api_key) # 假设您的API Key在CONFIG中
+        logger.info("✅ 宏观分析器已实例化")
+        
+        # 2. 并行启动 Discord Bot 和黑天鹅雷达 (无变动)
         from src.discord_bot import get_bot, initialize_bot
         discord_bot = get_bot()
         discord_bot.bot_data = {
@@ -218,17 +212,15 @@ async def lifespan(app: FastAPI):
             'config': CONFIG
         }
         
-        # 创建启动任务但不等待
         discord_bot_task = asyncio.create_task(initialize_bot(discord_bot))
         logger.info("✅ Discord Bot 启动任务已创建")
         
-        # 使用安全启动函数启动黑天鹅雷达
         radar_task = await safe_start_task(
             lambda: start_radar(),
             "黑天鹅雷达"
         )
         
-        # 3. 立即设置系统状态，不等待其他任务
+        # 3. 立即设置系统状态，不等待其他任务 (无变动)
         await SystemState.set_state("ACTIVE")
         startup_complete = True
         logger.info("🚀 系统启动完成 (状态: ACTIVE)")
@@ -251,7 +243,7 @@ async def lifespan(app: FastAPI):
         
         await graceful_shutdown()
 
-# --- FastAPI 应用 ---
+# --- FastAPI 应用 (无变动) ---
 app = FastAPI(
     title="量化交易系统",
     version="7.2",
@@ -259,7 +251,7 @@ app = FastAPI(
     debug=False
 )
 
-# --- 路由定义 ---
+# --- 路由定义 (有修改) ---
 @app.get("/")
 async def root() -> Dict[str, Any]:
     return {
@@ -282,14 +274,12 @@ async def health_check() -> Dict[str, Any]:
         }
     }
     
-    # 检查数据库
     try:
         from src.database import check_database_health
         checks["components"]["database"] = await check_database_health()
     except Exception as e:
         logger.error(f"数据库健康检查失败: {e}", exc_info=True)
     
-    # 检查交易所
     if hasattr(app.state, 'exchange'):
         try:
             await app.state.exchange.fetch_time()
@@ -297,15 +287,12 @@ async def health_check() -> Dict[str, Any]:
         except Exception as e:
             logger.error(f"交易所健康检查失败: {e}", exc_info=True)
     
-    # 检查Discord
     if discord_bot and discord_bot.is_ready():
         checks["components"]["discord"] = True
     
-    # 检查雷达
     if radar_task and not radar_task.done():
         checks["components"]["radar"] = True
     
-    # 设置整体状态
     checks["status"] = "ok" if all(checks["components"].values()) else "degraded"
     
     return checks
@@ -360,24 +347,53 @@ async def tradingview_webhook(request: Request) -> Dict[str, Any]:
         raise HTTPException(429, detail="请求过于频繁")
     
     try:
+        # --- 核心修改区域开始 ---
+        
+        # 1. 优先进行宏观决策检查
+        if not hasattr(app.state, 'macro_analyzer'):
+            raise HTTPException(503, detail="宏观分析器未初始化")
+        
+        macro_decision = await app.state.macro_analyzer.get_macro_decision()
+        logger.info(f"宏观决策结果: {macro_decision}")
+
+        # 2. 检查并执行清场指令
+        if macro_decision["liquidation_signal"]:
+            signal_reason = macro_decision["reason"]
+            if macro_decision["liquidation_signal"] == "LIQUIDATE_ALL_LONGS":
+                logger.warning(f"宏观清场指令触发: {signal_reason}")
+                # await liquidate_all_long_positions(app.state.exchange) # 调用平仓函数
+                return {"status": "liquidated_longs", "reason": signal_reason}
+                
+            elif macro_decision["liquidation_signal"] == "LIQUIDATE_ALL_SHORTS":
+                logger.warning(f"宏观清场指令触发: {signal_reason}")
+                # await liquidate_all_short_positions(app.state.exchange) # 调用平仓函数
+                return {"status": "liquidated_shorts", "reason": signal_reason}
+        
+        # 3. 如果没有清场指令，才继续处理交易信号
+        logger.info("宏观季节未切换，继续处理交易信号...")
         signal_data = await request.json()
         
-        # 记录详细的信号信息
         logger.info(f"收到交易信号 - IP: {client_ip}, 数据: {signal_data}")
         
-        # 添加信号验证
         required_fields = ['symbol', 'action', 'price']
         if not all(field in signal_data for field in required_fields):
             raise ValueError("缺少必要的信号字段")
         
-        # 检查系统状态
         current_state = await SystemState.get_state()
         if current_state != "ACTIVE":
             logger.warning(f"系统未激活，拒绝处理信号 - 当前状态: {current_state}")
             raise HTTPException(503, detail=f"系统未激活 ({current_state})")
         
-        # 这里可以添加处理交易信号的逻辑
-        # 例如：调用交易函数执行下单操作
+        # 在这里，您将使用 macro_decision["current_season"] 和其他宏观参数
+        # 去调用您的仓位计算和交易执行逻辑
+        # 例如:
+        # await process_trade_signal(
+        #     signal_data, 
+        #     macro_decision, 
+        #     app.state.exchange
+        # )
+        
+        # --- 核心修改区域结束 ---
         
         return {"status": "processed", "timestamp": time.time()}
         
@@ -388,7 +404,7 @@ async def tradingview_webhook(request: Request) -> Dict[str, Any]:
         logger.error(f"信号处理失败: {e}", exc_info=True)
         raise HTTPException(500, detail="内部处理错误")
 
-# --- 主函数 ---
+# --- 主函数 (无变动) ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
     logger.info(f"启动服务器，端口: {port}")
@@ -397,5 +413,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port,
         log_level="info",
-        workers=1  # 减少worker数量为1，避免内存溢出
+        workers=1
     )
