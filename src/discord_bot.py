@@ -132,6 +132,9 @@ class TradingCommands(commands.Cog, name="交易系统"):
     async def slash_status(self, interaction: discord.Interaction):
         """查看系统状态 - 斜杠命令版本"""
         try:
+            # 先发送一个延迟响应，避免交互超时
+            await interaction.response.defer(ephemeral=True)
+            
             embed = discord.Embed(
                 title="📊 系统状态",
                 color=discord.Color.green()
@@ -147,14 +150,21 @@ class TradingCommands(commands.Cog, name="交易系统"):
             else:
                 embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
             
-            await interaction.response.send_message(embed=embed)
+            # 使用 followup 发送实际响应
+            await interaction.followup.send(embed=embed, ephemeral=True)
             logger.info(f"✅ 用户 {interaction.user} 查看了系统状态")
+            
         except discord.errors.InteractionResponded:
             logger.error("交互已响应，无法再次发送响应")
         except Exception as e:
             logger.error(f"slash status 命令执行失败: {e}")
-            if not interaction.response.is_done():
-                await interaction.response.send_message("❌ 获取系统状态失败", ephemeral=True)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("❌ 获取系统状态失败", ephemeral=True)
+                else:
+                    await interaction.followup.send("❌ 获取系统状态失败", ephemeral=True)
+            except Exception as followup_error:
+                logger.error(f"发送错误消息失败: {followup_error}")
 
 # ================= 生命周期管理 =================
 async def initialize_bot(bot: commands.Bot):
