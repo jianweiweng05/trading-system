@@ -322,16 +322,25 @@ class QuickActionsView(View):
             embed.add_field(name="资本分配", value=getattr(CONFIG, 'allocation', 'balanced'))
             
             # 检查交易所连接状态
+            exchange_status = False
             if hasattr(interaction.client, 'bot_data') and 'exchange' in interaction.client.bot_data:
                 try:
                     # 尝试获取服务器时间来验证连接
                     await interaction.client.bot_data['exchange'].fetch_time()
+                    exchange_status = True
                     embed.add_field(name="交易所连接", value="🟢 已连接", inline=False)
                 except Exception as e:
                     logger.error(f"验证交易所连接失败: {e}")
                     embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
             else:
                 embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
+            
+            # 如果有交易系统命令Cog，触发状态更新
+            for cog in interaction.client.cogs.values():
+                if hasattr(cog, 'update_exchange_status'):
+                    if exchange_status:
+                        cog.update_exchange_status()
+                    break
             
             # 使用 followup 发送实际响应
             await interaction.followup.send(embed=embed, ephemeral=True)
