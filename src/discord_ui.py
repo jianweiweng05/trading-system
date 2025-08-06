@@ -320,9 +320,15 @@ class QuickActionsView(View):
             
             # 检查交易所连接状态
             if hasattr(interaction.client, 'bot_data') and 'exchange' in interaction.client.bot_data:
-                embed.add_field(name="交易所连接", value="🟢 已连接", inline=False)
+                try:
+                    # 尝试获取服务器时间来验证连接
+                    await interaction.client.bot_data['exchange'].fetch_time()
+                    embed.add_field(name="交易所连接", value="🟢 已连接", inline=False)
+                except Exception as e:
+                    logger.error(f"验证交易所连接失败: {e}")
+                    embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
             else:
-                embed.add_field(name="交易所连接", value="🔴 未连接", inline=False)
+                embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
             
             # 发送响应
             await interaction.response.send_message(embed=embed, ephemeral=True)
