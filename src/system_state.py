@@ -32,12 +32,12 @@ class SystemState:
         
         Args:
             new_state: 新状态，必须是以下值之一：
-                      "STARTING", "ACTIVE", "PAUSED", "HALTED", "EMERGENCY"
+                      "STARTING", "ACTIVE", "PAUSED", "HALTED", "EMERGENCY", "ERROR", "SHUTDOWN"
                       
         Raises:
             ValueError: 当状态值不在允许范围内时
         """
-        valid_states = {"STARTING", "ACTIVE", "PAUSED", "HALTED", "EMERGENCY"}
+        valid_states = {"STARTING", "ACTIVE", "PAUSED", "HALTED", "EMERGENCY", "ERROR", "SHUTDOWN"}
         if new_state not in valid_states:
             raise ValueError(f"非法状态: {new_state}")
 
