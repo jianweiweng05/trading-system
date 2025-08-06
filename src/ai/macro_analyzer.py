@@ -5,13 +5,16 @@ from .ai_client import AIClient
 logger = logging.getLogger(__name__)
 
 class MacroAnalyzer:
-    """宏观分析器"""
+    """宏观分析器 (已升级，增加了状态切换检测和清场逻辑)"""
     
     def __init__(self, api_key: str) -> None:
         self.ai_client: AIClient = AIClient(api_key)
+        # --- 新增内容 ---
+        # 用于存储上一次宏观季节判断的成员变量
+        self.last_known_season: Optional[str] = None
     
     async def get_macro_data(self) -> Dict[str, str]:
-        """获取宏观分析数据"""
+        """获取宏观分析数据 (无变动)"""
         # 此处为简化版，实际应从多个来源抓取数据
         return {
             "price_trend_summary": "BTC和ETH的200日均线斜率均大于3度，呈稳定上涨趋势。",
@@ -20,13 +23,74 @@ class MacroAnalyzer:
         }
     
     async def analyze_market_status(self) -> Optional[Dict[str, Any]]:
-        """分析市场状态"""
-        logger.info("开始宏观市场分析...")
+        """
+        分析市场状态 (此函数现在作为底层分析工具，为其调用者服务)
+        """
+        logger.info("正在调用AI模型进行底层宏观分析...") # 日志信息微调
         macro_data = await self.get_macro_data()
         result = await self.ai_client.analyze_macro(macro_data)
         
-        if not result:
-            logger.error("AI宏观分析失败", exc_info=True)
+        # 校验逻辑微调，确保关键字段存在
+        if not result or 'market_season' not in result:
+            logger.error("AI宏观分析失败或返回格式无效", exc_info=True)
             return None
             
         return result
+
+    # --- 新增核心决策方法 ---
+    async def get_macro_decision(self) -> Dict[str, Any]:
+        """
+        获取最终的宏观决策，包含状态切换时的清场指令。
+        这是您系统现在应该调用的主要入口。
+        """
+        logger.info("开始进行宏观决策...")
+        
+        # 1. 获取AI对当前市场的分析
+        ai_analysis = await self.analyze_market_status()
+        
+        if not ai_analysis:
+            # 如果AI分析失败，返回一个安全的“无操作”指令
+            return {
+                "current_season": self.last_known_season or "UNKNOWN",
+                "liquidation_signal": None, # 无清场信号
+                "reason": "AI analysis failed, no action taken."
+            }
+
+        current_season = ai_analysis['market_season']
+        liquidation_signal = None
+        reason = f"AI analysis complete. Current season: {current_season}."
+
+        # 2. 核心逻辑：检查宏观季节是否发生变化
+        if self.last_known_season and current_season != self.last_known_season:
+            logger.warning(
+                f"宏观季节发生切换！"
+                f"由 {self.last_known_season} 切换至 {current_season}"
+            )
+            
+            # 3. 如果发生变化，生成相应的清场指令
+            if current_season == "BULL":
+                # 熊市/震荡 -> 牛市：清算所有空头仓位
+                liquidation_signal = "LIQUIDATE_ALL_SHORTS"
+                reason = (
+                    f"宏观季节由 {self.last_known_season} 转为 BULL. "
+                    f"触发指令：清算所有空头仓位。"
+                )
+            
+            elif current_season == "BEAR":
+                # 牛市/震荡 -> 熊市：清算所有多头仓位
+                liquidation_signal = "LIQUIDATE_ALL_LONGS"
+                reason = (
+                    f"宏观季节由 {self.last_known_season} 转为 BEAR. "
+                    f"触发指令：清算所有多头仓位。"
+                )
+        
+        # 4. 更新“状态记忆”
+        self.last_known_season = current_season
+        
+        # 5. 返回最终决策包
+        return {
+            "current_season": current_season,
+            "ai_confidence": ai_analysis.get('confidence'),
+            "liquidation_signal": liquidation_signal,
+            "reason": reason
+        }
