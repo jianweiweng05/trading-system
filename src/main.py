@@ -228,7 +228,7 @@ async def lifespan(app: FastAPI):
         )
         
         # 3. 立即设置系统状态，不等待其他任务
-        await SystemState.set_state("ACTIVE", discord_bot)
+        await SystemState.set_state("ACTIVE")
         startup_complete = True
         logger.info("🚀 系统启动完成 (状态: ACTIVE)")
         
@@ -370,8 +370,8 @@ async def tradingview_webhook(request: Request) -> Dict[str, Any]:
             raise ValueError("缺少必要的信号字段")
         
         # 检查系统状态
-        if not await SystemState.is_active():
-            current_state = await SystemState.get_state()
+        current_state = await SystemState.get_state()
+        if current_state != "ACTIVE":
             logger.warning(f"系统未激活，拒绝处理信号 - 当前状态: {current_state}")
             raise HTTPException(503, detail=f"系统未激活 ({current_state})")
         
