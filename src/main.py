@@ -33,6 +33,7 @@ discord_bot_task: Optional[asyncio.Task] = None
 discord_bot: Optional[Any] = None
 radar_task: Optional[asyncio.Task] = None
 startup_complete: bool = False
+exchange_monitor_task: Optional[asyncio.Task] = None
 
 # --- 辅助函数 (无变动) ---
 def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
@@ -129,12 +130,61 @@ async def check_system_status() -> Dict[str, Any]:
     
     return status
 
-# --- 优雅关闭处理函数 (无变动) ---
+# --- 交易所连接监控函数 (新增) ---
+async def monitor_exchange_connection():
+    """监控交易所连接状态并在断开时尝试重连"""
+    global exchange_monitor_task
+    max_retries = 3
+    retry_delay = 5
+    
+    while True:
+        try:
+            if hasattr(app.state, 'exchange'):
+                await app.state.exchange.fetch_time()
+                await asyncio.sleep(30)  # 每30秒检查一次
+                continue
+            
+            logger.warning("检测到交易所连接断开，尝试重新连接...")
+            exchange = binance({
+                'apiKey': CONFIG.binance_api_key,
+                'secret': CONFIG.binance_api_secret,
+                'enableRateLimit': True,
+                'options': {
+                    'defaultType': 'future',
+                    'adjustForTimeDifference': True
+                }
+            })
+            
+            for i in range(max_retries):
+                try:
+                    await asyncio.sleep(retry_delay * i)
+                    await exchange.load_markets()
+                    app.state.exchange = exchange
+                    logger.info("✅ 交易所连接已恢复")
+                    
+                    # 更新Discord Bot中的交易所连接
+                    if discord_bot and hasattr(discord_bot, 'bot_data'):
+                        discord_bot.bot_data['exchange'] = exchange
+                    
+                    break
+                except Exception as e:
+                    if i == max_retries - 1:
+                        logger.error(f"❌ 交易所重连失败: {e}")
+                    else:
+                        logger.warning(f"交易所重试 {i + 1}/{max_retries}")
+            
+            await asyncio.sleep(30)
+            
+        except Exception as e:
+            logger.error(f"交易所连接监控出错: {e}")
+            await asyncio.sleep(30)
+
+# --- 优雅关闭处理函数 (有修改) ---
 async def graceful_shutdown():
     """优雅关闭所有服务"""
     logger.info("开始优雅关闭...")
     
-    tasks = [discord_bot_task, radar_task]
+    tasks = [discord_bot_task, radar_task, exchange_monitor_task]
     for task in tasks:
         if task and not task.done():
             task.cancel()
@@ -165,7 +215,7 @@ async def graceful_shutdown():
 # --- 生命周期管理 (有修改) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global discord_bot_task, discord_bot, radar_task, startup_complete
+    global discord_bot_task, discord_bot, radar_task, startup_complete, exchange_monitor_task
     exchange = None
     try:
         logger.info("🔄 系统启动中...")
@@ -222,7 +272,11 @@ async def lifespan(app: FastAPI):
             "黑天鹅雷达"
         )
         
-        # 3. 立即设置系统状态，不等待其他任务 (有修改)
+        # 3. 启动交易所连接监控任务 (新增)
+        exchange_monitor_task = asyncio.create_task(monitor_exchange_connection())
+        logger.info("✅ 交易所连接监控任务已创建")
+        
+        # 4. 立即设置系统状态，不等待其他任务 (有修改)
         await SystemState.set_state("ACTIVE")
         startup_complete = True
         logger.info("🚀 系统启动完成 (状态: ACTIVE)")
