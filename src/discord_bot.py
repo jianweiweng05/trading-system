@@ -118,7 +118,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
             if exchange_status:
                 embed.add_field(name="交易所连接", value="🟢 已连接", inline=False)
             else:
-                embed.add_field(name="交易所连接", value="🔴 未连接", inline=False)
+                embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
             
             await ctx.send(embed=embed)
             logger.info(f"✅ 用户 {ctx.author} 查看了系统状态")
@@ -145,7 +145,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
             if exchange_status:
                 embed.add_field(name="交易所连接", value="🟢 已连接", inline=False)
             else:
-                embed.add_field(name="交易所连接", value="🔴 未连接", inline=False)
+                embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
             
             await interaction.response.send_message(embed=embed)
             logger.info(f"✅ 用户 {interaction.user} 查看了系统状态")
