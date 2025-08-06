@@ -2,6 +2,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from .ai_client import AIClient
+from src.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ class BlackSwanRadar:
 # 黑天鹅雷达启动函数
 async def start_black_swan_radar() -> Optional[Dict[str, Any]]:
     """启动黑天鹅雷达的入口函数"""
-    from config import CONFIG
+    from src.config import CONFIG
     radar = BlackSwanRadar(CONFIG.deepseek_api_key)
     return await radar.scan_and_alert()
 
