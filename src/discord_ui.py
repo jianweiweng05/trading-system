@@ -308,6 +308,9 @@ class QuickActionsView(View):
     async def refresh_status(self, interaction: discord.Interaction):
         """刷新状态"""
         try:
+            # 先发送延迟响应
+            await interaction.response.defer(ephemeral=True)
+            
             # 创建状态嵌入消息
             embed = discord.Embed(
                 title="📊 系统状态",
@@ -330,19 +333,30 @@ class QuickActionsView(View):
             else:
                 embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
             
-            # 发送响应
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            # 使用 followup 发送实际响应
+            await interaction.followup.send(embed=embed, ephemeral=True)
             
             # 记录日志
             logger.info(f"用户 {interaction.user} 刷新了系统状态")
             
+        except discord.errors.InteractionResponded:
+            logger.error("交互已响应，无法再次发送响应")
         except Exception as e:
             logger.error(f"刷新状态失败: {e}", exc_info=True)
-            await interaction.response.send_message("刷新失败，请稍后重试", ephemeral=True)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("刷新失败，请稍后重试", ephemeral=True)
+                else:
+                    await interaction.followup.send("刷新失败，请稍后重试", ephemeral=True)
+            except Exception as followup_error:
+                logger.error(f"发送错误消息失败: {followup_error}")
     
     async def view_positions(self, interaction: discord.Interaction):
         """查看持仓"""
         try:
+            # 先发送延迟响应
+            await interaction.response.defer(ephemeral=True)
+            
             # 这里添加查看持仓逻辑
             embed = discord.Embed(
                 title="📊 当前持仓",
@@ -350,35 +364,53 @@ class QuickActionsView(View):
                 color=discord.Color.blue()
             )
             
-            # 发送响应
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            # 使用 followup 发送实际响应
+            await interaction.followup.send(embed=embed, ephemeral=True)
             
             # 记录日志
             logger.info(f"用户 {interaction.user} 查看了持仓信息")
             
         except Exception as e:
             logger.error(f"查看持仓失败: {e}", exc_info=True)
-            await interaction.response.send_message("查看持仓失败，请稍后重试", ephemeral=True)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("查看持仓失败，请稍后重试", ephemeral=True)
+                else:
+                    await interaction.followup.send("查看持仓失败，请稍后重试", ephemeral=True)
+            except Exception as followup_error:
+                logger.error(f"发送错误消息失败: {followup_error}")
     
     async def save_config(self, interaction: discord.Interaction):
         """保存配置"""
         try:
+            # 先发送延迟响应
+            await interaction.response.defer(ephemeral=True)
+            
             # 这里添加保存配置逻辑
             # 例如：将配置保存到数据库
             
-            # 发送响应
-            await interaction.response.send_message("✅ 配置已保存", ephemeral=True)
+            # 使用 followup 发送实际响应
+            await interaction.followup.send("✅ 配置已保存", ephemeral=True)
             
             # 记录日志
             logger.info(f"用户 {interaction.user} 保存了配置")
             
         except Exception as e:
             logger.error(f"保存配置失败: {e}", exc_info=True)
-            await interaction.response.send_message("❌ 保存失败，请稍后重试", ephemeral=True)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("❌ 保存失败，请稍后重试", ephemeral=True)
+                else:
+                    await interaction.followup.send("❌ 保存失败，请稍后重试", ephemeral=True)
+            except Exception as followup_error:
+                logger.error(f"发送错误消息失败: {followup_error}")
     
     async def view_logs(self, interaction: discord.Interaction):
         """查看日志"""
         try:
+            # 先发送延迟响应
+            await interaction.response.defer(ephemeral=True)
+            
             # 这里添加查看日志逻辑
             embed = discord.Embed(
                 title="📝 系统日志",
@@ -393,15 +425,21 @@ class QuickActionsView(View):
                 inline=False
             )
             
-            # 发送响应
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            # 使用 followup 发送实际响应
+            await interaction.followup.send(embed=embed, ephemeral=True)
             
             # 记录日志
             logger.info(f"用户 {interaction.user} 查看了系统日志")
             
         except Exception as e:
             logger.error(f"查看日志失败: {e}", exc_info=True)
-            await interaction.response.send_message("查看日志失败，请稍后重试", ephemeral=True)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("查看日志失败，请稍后重试", ephemeral=True)
+                else:
+                    await interaction.followup.send("查看日志失败，请稍后重试", ephemeral=True)
+            except Exception as followup_error:
+                logger.error(f"发送错误消息失败: {followup_error}")
 
 class TradingDashboard(commands.Cog, name="交易面板"):
     """交易系统控制面板"""
@@ -413,6 +451,9 @@ class TradingDashboard(commands.Cog, name="交易面板"):
     async def dashboard(self, interaction: discord.Interaction):
         """打开交易控制面板"""
         try:
+            # 先发送延迟响应
+            await interaction.response.defer(ephemeral=True)
+            
             # 创建主面板嵌入消息
             embed = discord.Embed(
                 title="🎛️ 交易控制面板",
@@ -427,8 +468,8 @@ class TradingDashboard(commands.Cog, name="交易面板"):
                 inline=False
             )
             
-            # 发送消息并添加组件
-            await interaction.response.send_message(
+            # 使用 followup 发送实际响应
+            await interaction.followup.send(
                 embed=embed,
                 view=TradingModeView(),
                 ephemeral=True
@@ -436,12 +477,21 @@ class TradingDashboard(commands.Cog, name="交易面板"):
             
         except Exception as e:
             logger.error(f"打开交易控制面板失败: {e}", exc_info=True)
-            await interaction.response.send_message("❌ 打开面板失败，请稍后重试", ephemeral=True)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("❌ 打开面板失败，请稍后重试", ephemeral=True)
+                else:
+                    await interaction.followup.send("❌ 打开面板失败，请稍后重试", ephemeral=True)
+            except Exception as followup_error:
+                logger.error(f"发送错误消息失败: {followup_error}")
 
     @app_commands.command(name="parameters", description="调整交易参数")
     async def parameters(self, interaction: discord.Interaction):
         """调整交易参数"""
         try:
+            # 先发送延迟响应
+            await interaction.response.defer(ephemeral=True)
+            
             # 创建参数面板嵌入消息
             embed = discord.Embed(
                 title="⚙️ 交易参数设置",
@@ -466,8 +516,8 @@ class TradingDashboard(commands.Cog, name="交易面板"):
                 inline=True
             )
             
-            # 发送消息并添加组件
-            await interaction.response.send_message(
+            # 使用 followup 发送实际响应
+            await interaction.followup.send(
                 embed=embed,
                 view=ParameterControlView(),
                 ephemeral=True
@@ -475,12 +525,21 @@ class TradingDashboard(commands.Cog, name="交易面板"):
             
         except Exception as e:
             logger.error(f"打开参数设置面板失败: {e}", exc_info=True)
-            await interaction.response.send_message("❌ 打开参数面板失败，请稍后重试", ephemeral=True)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("❌ 打开参数面板失败，请稍后重试", ephemeral=True)
+                else:
+                    await interaction.followup.send("❌ 打开参数面板失败，请稍后重试", ephemeral=True)
+            except Exception as followup_error:
+                logger.error(f"发送错误消息失败: {followup_error}")
 
     @app_commands.command(name="quick_actions", description="快速操作")
     async def quick_actions(self, interaction: discord.Interaction):
         """快速操作"""
         try:
+            # 先发送延迟响应
+            await interaction.response.defer(ephemeral=True)
+            
             # 创建快速操作面板嵌入消息
             embed = discord.Embed(
                 title="🚀 快速操作",
@@ -488,8 +547,8 @@ class TradingDashboard(commands.Cog, name="交易面板"):
                 color=discord.Color.blue()
             )
             
-            # 发送消息并添加组件
-            await interaction.response.send_message(
+            # 使用 followup 发送实际响应
+            await interaction.followup.send(
                 embed=embed,
                 view=QuickActionsView(),
                 ephemeral=True
@@ -497,4 +556,10 @@ class TradingDashboard(commands.Cog, name="交易面板"):
             
         except Exception as e:
             logger.error(f"打开快速操作面板失败: {e}", exc_info=True)
-            await interaction.response.send_message("❌ 打开快速操作面板失败，请稍后重试", ephemeral=True)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("❌ 打开快速操作面板失败，请稍后重试", ephemeral=True)
+                else:
+                    await interaction.followup.send("❌ 打开快速操作面板失败，请稍后重试", ephemeral=True)
+            except Exception as followup_error:
+                logger.error(f"发送错误消息失败: {followup_error}")
