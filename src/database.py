@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngin
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import (
-    Table, Column, Integer, String, Float, DateTime, MetaData, insert, select, update, func, Text, text
+    Column, Integer, String, Float, DateTime, MetaData, insert, select, update, func, Text, text
 )
 
 logger = logging.getLogger(__name__)
@@ -68,26 +68,6 @@ class Setting(Base):
     
     key = Column(String, primary_key=True)
     value = Column(Text)
-
-trades = Table(
-    'trades', metadata,
-    Column('id', Integer, primary_key=True, autoincrement=True),
-    Column('symbol', String, nullable=False, index=True),
-    Column('quantity', Float, nullable=False),
-    Column('entry_price', Float, nullable=False),
-    Column('exit_price', Float),
-    Column('trade_type', String, nullable=False),
-    Column('status', String, nullable=False, default='OPEN', index=True),
-    Column('strategy_id', String),
-    Column('created_at', DateTime, default=func.now()),
-    Column('updated_at', DateTime, default=func.now(), onupdate=func.now())
-)
-
-settings = Table(
-    'settings', metadata,
-    Column('key', String, primary_key=True),
-    Column('value', Text)
-)
 
 def with_transaction(func):
     """事务装饰器"""
@@ -170,17 +150,20 @@ async def set_setting(key: str, value: str) -> None:
     """设置设置项"""
     try:
         async with engine.connect() as conn:
-            check_stmt = select(settings.c.key).where(settings.c.key == key)
+            # 使用 ORM 模型进行查询和更新
+            from . import Setting
+            check_stmt = select(Setting).where(Setting.key == key)
             result = await conn.execute(check_stmt)
             
             if result.scalar_one_or_none():
-                update_stmt = update(settings).where(settings.c.key == key).values(value=str(value))
+                update_stmt = update(Setting).where(Setting.key == key).values(value=str(value))
                 await conn.execute(update_stmt)
             else:
-                stmt = insert(settings).values(key=key, value=str(value))
-                await conn.execute(stmt)
+                new_setting = Setting(key=key, value=str(value))
+                session = AsyncSession(conn)
+                session.add(new_setting)
+                await session.commit()
             
-            await conn.commit()
             logger.info(f"设置项 '{key}' 已更新为: {value}")
     except Exception as e:
         logger.error(f"设置配置项 '{key}' 失败: {str(e)}", exc_info=True)
@@ -205,19 +188,20 @@ async def log_trade(symbol: str, quantity: float, entry_price: float,
     """记录交易"""
     try:
         async with engine.connect() as conn:
-            stmt = insert(trades).values(
-                symbol=symbol, 
-                quantity=quantity, 
+            # 使用 ORM 模型创建新记录
+            new_trade = Trade(
+                symbol=symbol,
+                quantity=quantity,
                 entry_price=entry_price,
-                trade_type=trade_type.upper(), 
-                status=status.upper(), 
+                trade_type=trade_type.upper(),
+                status=status.upper(),
                 strategy_id=strategy_id
             )
-            result = await conn.execute(stmt)
-            await conn.commit()
-            trade_id = result.inserted_primary_key[0]
-            logger.info(f"记录交易: {symbol} {trade_type} {quantity} @ {entry_price} (ID: {trade_id})")
-            return trade_id
+            session = AsyncSession(conn)
+            session.add(new_trade)
+            await session.commit()
+            logger.info(f"记录交易: {symbol} {trade_type} {quantity} @ {entry_price} (ID: {new_trade.id})")
+            return new_trade.id
     except Exception as e:
         logger.error(f"记录交易失败: {str(e)}", exc_info=True)
         raise
@@ -226,8 +210,9 @@ async def close_trade(trade_id: int, exit_price: float) -> bool:
     """平仓"""
     try:
         async with engine.connect() as conn:
-            update_stmt = update(trades).where(trades.c.id == trade_id).values(
-                status='CLOSED', 
+            # 使用 ORM 模型进行更新
+            update_stmt = update(Trade).where(Trade.id == trade_id).values(
+                status='CLOSED',
                 exit_price=exit_price,
                 updated_at=func.now()
             )
@@ -246,15 +231,15 @@ async def get_trade_history(symbol: Optional[str] = None, limit: Optional[int] =
     try:
         async with engine.connect() as conn:
             if symbol:
-                stmt = select(trades).where(trades.c.symbol == symbol).order_by(trades.c.created_at.desc())
+                stmt = select(Trade).where(Trade.symbol == symbol).order_by(Trade.created_at.desc())
             else:
-                stmt = select(trades).order_by(trades.c.created_at.desc())
+                stmt = select(Trade).order_by(Trade.created_at.desc())
             
             if limit:
                 stmt = stmt.limit(limit)
                 
             result = await conn.execute(stmt)
-            trades = result.fetchall()
+            trades = result.scalars().all()
             logger.info(f"获取到 {len(trades)} 条交易记录")
             return trades
     except Exception as e:
@@ -265,14 +250,14 @@ async def get_position_by_symbol(symbol: str) -> Optional[Trade]:
     """根据交易对获取持仓"""
     try:
         async with engine.connect() as conn:
-            stmt = select(trades).where(
-                trades.c.symbol == symbol,
-                trades.c.status == 'OPEN'
+            stmt = select(Trade).where(
+                Trade.symbol == symbol,
+                Trade.status == 'OPEN'
             )
             result = await conn.execute(stmt)
-            position = result.fetchone()
+            position = result.scalar_one_or_none()
             if position:
-                logger.info(f"找到 {symbol} 持仓: {position['quantity']} @ {position['entry_price']}")
+                logger.info(f"找到 {symbol} 持仓: {position.quantity} @ {position.entry_price}")
                 return position
             else:
                 logger.info(f"未找到 {symbol} 的持仓")
