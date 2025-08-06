@@ -17,6 +17,8 @@ from src.config import CONFIG
 from src.system_state import SystemState
 # --- 新增导入：导入我们升级后的 MacroAnalyzer ---
 from src.ai.macro_analyzer import MacroAnalyzer
+# --- 新增导入：导入黑天鹅雷达 ---
+from src.ai.black_swan_radar import start_black_swan_radar
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -216,7 +218,7 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Discord Bot 启动任务已创建")
         
         radar_task = await safe_start_task(
-            lambda: start_radar(),
+            lambda: start_black_swan_radar(),
             "黑天鹅雷达"
         )
         
