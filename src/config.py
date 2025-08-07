@@ -36,6 +36,9 @@ class Config(BaseSettings):
     alert_api_retry_count: int = Field(default=3, env="ALERT_API_RETRY_COUNT")  # API重试次数
     alert_cooldown_period: int = Field(default=300, env="ALERT_COOLDOWN_PERIOD")  # 报警冷却时间（秒）
 
+    # 交易引擎配置
+    trading_engine: bool = Field(default=True, env="TRADING_ENGINE")
+
     class Config:
         # 允许额外的字段，这样可以在不修改代码的情况下添加新的配置
         extra = "allow"
