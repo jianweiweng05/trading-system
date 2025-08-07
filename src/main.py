@@ -173,16 +173,17 @@ async def lifespan(app: FastAPI):
                     raise
         
         # 3. 初始化报警系统
-        if not CONFIG.discord_alert_webhook:
-            raise ValueError("Discord webhook URL未配置")
-        
-        app.state.alert_system = AlertSystem(
-            webhook_url=CONFIG.discord_alert_webhook,
-            cooldown_period=CONFIG.alert_cooldown_period
-        )
-        await app.state.alert_system.start()
-        alert_system = app.state.alert_system
-        logger.info("✅ 报警系统已启动")
+        if CONFIG.discord_alert_webhook:
+            app.state.alert_system = AlertSystem(
+                webhook_url=CONFIG.discord_alert_webhook,
+                cooldown_period=CONFIG.alert_cooldown_period
+            )
+            await app.state.alert_system.start()
+            alert_system = app.state.alert_system
+            logger.info("✅ 报警系统已启动")
+        else:
+            logger.warning("⚠️ 未配置Discord webhook，报警系统将不会启动")
+            app.state.alert_system = None
         
         # 4. 初始化 AI 分析器
         app.state.macro_analyzer = MacroAnalyzer(api_key=CONFIG.deepseek_api_key)
