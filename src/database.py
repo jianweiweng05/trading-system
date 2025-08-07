@@ -15,11 +15,15 @@ logger = logging.getLogger(__name__)
 
 def get_db_paths() -> str:
     """获取安全的数据库路径"""
-    # 在Render平台使用项目目录下的data文件夹
+    # 在Render平台使用disk挂载路径，在本地使用项目目录
     if "RENDER" in os.environ:
-        base_path = os.path.join(os.getcwd(), "data")
+        # Render的disk挂载路径
+        base_path = "/opt/render/project/persistent"
+        logger.info(f"检测到Render环境，使用disk挂载路径: {base_path}")
     else:
+        # 本地环境使用项目目录
         base_path = os.path.join(os.getcwd(), "data")
+        logger.info(f"本地环境，使用项目目录: {base_path}")
     
     try:
         os.makedirs(base_path, exist_ok=True)
@@ -105,6 +109,10 @@ class DatabaseConnectionPool:
                 raise
             finally:
                 await session.close()
+    
+    def get_simple_session(self) -> AsyncSession:
+        """获取简单的数据库会话"""
+        return self.session_factory()
 
 async def init_db() -> None:
     """初始化数据库"""
@@ -154,7 +162,6 @@ async def set_setting(key: str, value: str) -> None:
     try:
         async with engine.connect() as conn:
             # 使用 ORM 模型进行查询和更新
-            from . import Setting
             check_stmt = select(Setting).where(Setting.key == key)
             result = await conn.execute(check_stmt)
             
@@ -224,7 +231,7 @@ async def close_trade(trade_id: int, exit_price: float) -> bool:
             success = result.rowcount > 0
             if success:
                 logger.info(f"交易 {trade_id} 已平仓 @ {exit_price}")
-            return success
+                return success
     except Exception as e:
         logger.error(f"平仓失败: {str(e)}", exc_info=True)
         return False
