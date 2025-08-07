@@ -86,7 +86,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
         self._macro_status: Optional[Dict[str, Any]] = None
         self._last_macro_update: float = 0
     
-    # 新增：获取宏观状态方法
+    # 修改：获取宏观状态方法
     async def get_macro_status(self) -> Dict[str, Any]:
         """获取宏观状态信息"""
         current_time = asyncio.get_event_loop().time()
@@ -97,27 +97,39 @@ class TradingCommands(commands.Cog, name="交易系统"):
             
             logger.info("更新宏观状态缓存...")
             try:
-                if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
-                    trading_engine = self.bot.bot_data['trading_engine']
-                    if hasattr(trading_engine, 'get_macro_status'):
-                        self._macro_status = await trading_engine.get_macro_status()
-                        self._last_macro_update = current_time
+                # 从数据库获取TV状态
+                from src.database import get_db_connection
+                async with get_db_connection() as conn:
+                    cursor = await conn.execute('SELECT symbol, status FROM tv_status')
+                    rows = await cursor.fetchall()
+                    
+                    tv_status = {row['symbol']: row['status'] for row in rows}
+                    
+                    self._macro_status = {
+                        'trend': '未知',  # 保持宏观趋势为未知
+                        'btc1d': tv_status.get('btc', CONFIG.default_btc_status),
+                        'eth1d': tv_status.get('eth', CONFIG.default_eth_status),
+                        'confidence': 0,
+                        'last_update': current_time
+                    }
+                    self._last_macro_update = current_time
+                    
             except Exception as e:
                 logger.error(f"获取宏观状态失败: {e}")
                 # 如果获取失败，返回默认值
                 if not self._macro_status:
                     self._macro_status = {
                         'trend': '未知',
-                        'btc1d': '未知',
-                        'eth1d': '未知',
+                        'btc1d': CONFIG.default_btc_status,
+                        'eth1d': CONFIG.default_eth_status,
                         'confidence': 0,
                         'last_update': current_time
                     }
         
         return self._macro_status.copy() if self._macro_status else {
             'trend': '未知',
-            'btc1d': '未知',
-            'eth1d': '未知',
+            'btc1d': CONFIG.default_btc_status,
+            'eth1d': CONFIG.default_eth_status,
             'confidence': 0,
             'last_update': current_time
         }
@@ -143,8 +155,12 @@ ETH1d ({macro_status['eth1d']})"""
             embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
             
             # 添加报警状态显示
+            alert_enabled = CONFIG.discord_alert_webhook is not None
             alert_status = "🟢 正常" if not self.alert_status['active'] else "🔴 报警中"
+            if not alert_enabled:
+                alert_status += " (未启用)"
             embed.add_field(name="报警状态", value=alert_status, inline=False)
+            
             if self.alert_status['last_alert']:
                 embed.add_field(name="最近报警", value=self.alert_status['last_alert'], inline=False)
             embed.add_field(name="总报警次数", value=str(self.alert_status['alert_count']), inline=True)
@@ -180,8 +196,12 @@ ETH1d ({macro_status['eth1d']})"""
             embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
             
             # 添加报警状态显示
+            alert_enabled = CONFIG.discord_alert_webhook is not None
             alert_status = "🟢 正常" if not self.alert_status['active'] else "🔴 报警中"
+            if not alert_enabled:
+                alert_status += " (未启用)"
             embed.add_field(name="报警状态", value=alert_status, inline=False)
+            
             if self.alert_status['last_alert']:
                 embed.add_field(name="最近报警", value=self.alert_status['last_alert'], inline=False)
             embed.add_field(name="总报警次数", value=str(self.alert_status['alert_count']), inline=True)
