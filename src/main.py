@@ -21,6 +21,8 @@ from src.ai.macro_analyzer import MacroAnalyzer
 from src.ai.black_swan_radar import start_black_swan_radar
 # --- 新增导入：导入报警系统 ---
 from src.alert_system import AlertSystem
+# --- 新增导入：导入交易引擎 ---
+from src.trading_engine import TradingEngine
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -36,6 +38,7 @@ discord_bot: Optional[Any] = None
 radar_task: Optional[asyncio.Task] = None
 startup_complete: bool = False
 alert_system: Optional[AlertSystem] = None
+trading_engine: Optional[TradingEngine] = None
 
 # --- 辅助函数 (无变动) ---
 def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
@@ -78,7 +81,9 @@ async def start_discord_bot() -> Optional[Any]:
         
         discord_bot.bot_data = {
             'exchange': getattr(app.state, 'exchange', None),
-            'config': CONFIG
+            'config': CONFIG,
+            'alert_system': alert_system,
+            'trading_engine': trading_engine
         }
         
         if discord_bot.bot_data['exchange']:
@@ -140,6 +145,16 @@ async def check_system_status() -> Dict[str, Any]:
         logger.error(f"报警系统状态检查失败: {e}", exc_info=True)
         status["components"]["alert_system"] = False
     
+    # 添加交易引擎状态检查
+    try:
+        if trading_engine:
+            status["components"]["trading_engine"] = True
+        else:
+            status["components"]["trading_engine"] = False
+    except Exception as e:
+        logger.error(f"交易引擎状态检查失败: {e}", exc_info=True)
+        status["components"]["trading_engine"] = False
+    
     return status
 
 # --- 优雅关闭处理函数 (修改) ---
@@ -166,6 +181,17 @@ async def graceful_shutdown():
         except Exception as e:
             logger.error(f"关闭报警系统失败: {e}")
     
+    # 关闭交易引擎
+    if trading_engine:
+        try:
+            # 取消所有活动订单
+            active_orders = trading_engine.get_active_orders()
+            for order_id in active_orders:
+                await trading_engine.cancel_order(order_id)
+            logger.info("✅ 交易引擎已停止")
+        except Exception as e:
+            logger.error(f"关闭交易引擎失败: {e}")
+    
     if discord_bot and discord_bot.is_ready():
         try:
             from src.discord_bot import stop_bot_services
@@ -186,7 +212,7 @@ async def graceful_shutdown():
 # --- 生命周期管理 (修改) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global discord_bot_task, discord_bot, radar_task, startup_complete, alert_system
+    global discord_bot_task, discord_bot, radar_task, startup_complete, alert_system, trading_engine
     exchange = None
     try:
         logger.info("🔄 系统启动中...")
@@ -235,13 +261,22 @@ async def lifespan(app: FastAPI):
         await alert_system.start()
         logger.info("✅ 报警系统已初始化")
         
+        # --- 新增内容：初始化交易引擎 ---
+        trading_engine = TradingEngine(
+            exchange=exchange,
+            alert_system=alert_system
+        )
+        app.state.trading_engine = trading_engine
+        logger.info("✅ 交易引擎已初始化")
+        
         # 2. 并行启动 Discord Bot 和黑天鹅雷达 (无变动)
         from src.discord_bot import get_bot, initialize_bot
         discord_bot = get_bot()
         discord_bot.bot_data = {
             'exchange': exchange,
             'config': CONFIG,
-            'alert_system': alert_system  # 添加报警系统到bot数据
+            'alert_system': alert_system,
+            'trading_engine': trading_engine
         }
         
         discord_bot_task = asyncio.create_task(initialize_bot(discord_bot))
@@ -303,7 +338,8 @@ async def health_check() -> Dict[str, Any]:
             "exchange": False,
             "discord": False,
             "radar": False,
-            "alert_system": False  # 添加报警系统检查
+            "alert_system": False,
+            "trading_engine": False
         }
     }
     
@@ -329,6 +365,9 @@ async def health_check() -> Dict[str, Any]:
     if alert_system and alert_system.is_running:
         checks["components"]["alert_system"] = True
     
+    if trading_engine:
+        checks["components"]["trading_engine"] = True
+    
     checks["status"] = "ok" if all(checks["components"].values()) else "degraded"
     
     return checks
@@ -343,7 +382,8 @@ async def startup_check() -> Dict[str, Any]:
             "exchange_ready": False,
             "discord_ready": False,
             "radar_ready": False,
-            "alert_system_ready": False  # 添加报警系统检查
+            "alert_system_ready": False,
+            "trading_engine_ready": False
         }
     }
     
@@ -363,6 +403,8 @@ async def startup_check() -> Dict[str, Any]:
             checks["components"]["radar_ready"] = True
         if alert_system and alert_system.is_running:
             checks["components"]["alert_system_ready"] = True
+        if trading_engine:
+            checks["components"]["trading_engine_ready"] = True
     except Exception as e:
         logger.error(f"启动检查失败: {e}", exc_info=True)
     
@@ -406,8 +448,18 @@ async def tradingview_webhook(request: Request) -> Dict[str, Any]:
                         alert_type="LIQUIDATION",
                         message=f"多头清场指令触发: {signal_reason}"
                     )
-                # 这里应该调用实际的平仓函数
-                # await liquidate_all_positions(app.state.exchange)
+                # 使用交易引擎执行平仓
+                if trading_engine:
+                    # 获取所有多头持仓
+                    positions = await trading_engine.get_position("*")
+                    for symbol, position in positions.items():
+                        if float(position.get('size', 0)) > 0:
+                            await trading_engine.execute_order(
+                                symbol=symbol,
+                                order_type="market",
+                                side="sell",
+                                amount=float(position['size'])
+                            )
                 return {"status": "liquidated_longs", "reason": signal_reason}
                 
             elif macro_decision["liquidation_signal"] == "LIQUIDATE_ALL_SHORTS":
@@ -418,8 +470,18 @@ async def tradingview_webhook(request: Request) -> Dict[str, Any]:
                         alert_type="LIQUIDATION",
                         message=f"空头清场指令触发: {signal_reason}"
                     )
-                # 这里应该调用实际的平仓函数
-                # await liquidate_all_shorts(app.state.exchange)
+                # 使用交易引擎执行平仓
+                if trading_engine:
+                    # 获取所有空头持仓
+                    positions = await trading_engine.get_position("*")
+                    for symbol, position in positions.items():
+                        if float(position.get('size', 0)) < 0:
+                            await trading_engine.execute_order(
+                                symbol=symbol,
+                                order_type="market",
+                                side="buy",
+                                amount=abs(float(position['size']))
+                            )
                 return {"status": "liquidated_shorts", "reason": signal_reason}
         
         # 3. 如果没有清场指令，才继续处理交易信号
@@ -437,23 +499,23 @@ async def tradingview_webhook(request: Request) -> Dict[str, Any]:
             logger.warning(f"系统未激活，拒绝处理信号 - 当前状态: {current_state}")
             raise HTTPException(503, detail=f"系统未激活 ({current_state})")
         
+        # 使用交易引擎执行交易
+        if trading_engine:
+            try:
+                order_result = await trading_engine.execute_order(
+                    symbol=signal_data['symbol'],
+                    order_type="market",
+                    side=signal_data['action'],
+                    amount=signal_data.get('amount', 0),
+                    price=signal_data.get('price')
+                )
+                logger.info(f"订单执行成功: {order_result}")
+            except Exception as e:
+                logger.error(f"订单执行失败: {e}")
+                raise
+        
         # --- 核心修改区域结束 ---
         
-        # 在这里，您将使用 macro_decision 的参数去调用您的仓位计算和交易执行逻辑
-        # 例如:
-        # from src.core_trading_logic import calculate_target_position_value
-        # position_value = calculate_target_position_value(
-        #     account_equity=10000.0,
-        #     allocation_percent=0.1,
-        #     macro_decision=macro_decision,
-        #     resonance_multiplier=1.0,
-        #     dynamic_risk_coeff=0.8,
-        #     fixed_leverage=2.0
-        # )
-        # logger.info(f"计算目标仓位: {position_value}")
-        # await execute_trade(...)
-        
-        # 由于您要求不要写代码，这里只返回一个占位符
         return {"status": "processed", "timestamp": time.time()}
         
     except ValueError as e:
