@@ -44,8 +44,8 @@ trading_engine: Optional[TradingEngine] = None
 async def init_tv_status_table():
     """初始化TV状态表"""
     try:
-        from src.database import get_db_connection
-        conn = await get_db_connection().__anext__()
+        from src.database import db_pool
+        conn = db_pool.get_simple_session()
         try:
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS tv_status (
@@ -67,8 +67,8 @@ async def load_tv_status() -> Dict[str, str]:
     """从数据库加载TV状态"""
     status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
     try:
-        from src.database import get_db_connection
-        conn = await get_db_connection().__anext__()
+        from src.database import db_pool
+        conn = db_pool.get_simple_session()
         try:
             cursor = await conn.execute('SELECT symbol, status FROM tv_status')
             rows = await cursor.fetchall()
@@ -83,8 +83,8 @@ async def load_tv_status() -> Dict[str, str]:
 async def save_tv_status(symbol: str, status: str):
     """保存TV状态到数据库"""
     try:
-        from src.database import get_db_connection
-        conn = await get_db_connection().__anext__()
+        from src.database import db_pool
+        conn = db_pool.get_simple_session()
         try:
             await conn.execute('''
                 INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
