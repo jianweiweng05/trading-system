@@ -12,6 +12,9 @@ class MacroAnalyzer:
         # --- 新增内容 ---
         # 用于存储上一次宏观季节判断的成员变量
         self.last_known_season: Optional[str] = None
+        # 添加详细状态缓存
+        self._detailed_status: Optional[Dict[str, Any]] = None
+        self._last_status_update: float = 0
     
     async def get_macro_data(self) -> Dict[str, str]:
         """获取宏观分析数据 (无变动)"""
@@ -49,7 +52,7 @@ class MacroAnalyzer:
         ai_analysis = await self.analyze_market_status()
         
         if not ai_analysis:
-            # 如果AI分析失败，返回一个安全的“无操作”指令
+            # 如果AI分析失败，返回一个安全的"无操作"指令
             return {
                 "current_season": self.last_known_season or "UNKNOWN",
                 "liquidation_signal": None, # 无清场信号
@@ -84,13 +87,58 @@ class MacroAnalyzer:
                     f"触发指令：清算所有多头仓位。"
                 )
         
-        # 4. 更新“状态记忆”
+        # 4. 更新"状态记忆"
         self.last_known_season = current_season
         
-        # 5. 返回最终决策包
+        # 5. 更新详细状态缓存
+        self._detailed_status = {
+            'trend': '牛' if current_season == 'BULL' else '熊' if current_season == 'BEAR' else '震荡',
+            'btc1d': ai_analysis.get('btc_trend', '中性'),
+            'eth1d': ai_analysis.get('eth_trend', '中性'),
+            'confidence': ai_analysis.get('confidence', 0),
+            'last_update': ai_analysis.get('timestamp')
+        }
+        self._last_status_update = ai_analysis.get('timestamp', 0)
+        
+        # 6. 返回最终决策包
         return {
             "current_season": current_season,
             "ai_confidence": ai_analysis.get('confidence'),
             "liquidation_signal": liquidation_signal,
             "reason": reason
         }
+    
+    # --- 新增方法：获取详细状态 ---
+    async def get_detailed_status(self) -> Dict[str, Any]:
+        """
+        获取详细的宏观状态信息，用于UI显示
+        """
+        # 如果缓存不存在或过期（超过5分钟），重新获取
+        current_time = time.time()
+        if (not self._detailed_status or 
+            current_time - self._last_status_update > 300):
+            
+            logger.info("更新宏观状态缓存...")
+            ai_analysis = await self.analyze_market_status()
+            
+            if ai_analysis:
+                self._detailed_status = {
+                    'trend': '牛' if ai_analysis.get('market_season') == 'BULL' else '熊' if ai_analysis.get('market_season') == 'BEAR' else '震荡',
+                    'btc1d': ai_analysis.get('btc_trend', '中性'),
+                    'eth1d': ai_analysis.get('eth_trend', '中性'),
+                    'confidence': ai_analysis.get('confidence', 0),
+                    'last_update': ai_analysis.get('timestamp', current_time)
+                }
+                self._last_status_update = current_time
+            else:
+                # 如果分析失败，返回缓存的状态或默认值
+                if not self._detailed_status:
+                    self._detailed_status = {
+                        'trend': '未知',
+                        'btc1d': '未知',
+                        'eth1d': '未知',
+                        'confidence': 0,
+                        'last_update': current_time
+                    }
+        
+        return self._detailed_status.copy()
