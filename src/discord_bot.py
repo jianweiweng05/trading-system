@@ -138,8 +138,18 @@ class TradingCommands(commands.Cog, name="交易系统"):
             try:
                 if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
                     trading_engine = self.bot.bot_data['trading_engine']
-                    if hasattr(trading_engine, 'get_resonance_status'):
-                        self._resonance_status = await trading_engine.get_resonance_status()
+                    if hasattr(trading_engine, 'get_resonance_pool'):
+                        pool_data = await trading_engine.get_resonance_pool()
+                        # 转换数据格式以适配前端显示
+                        self._resonance_status = {
+                            'signal_count': pool_data.get('count', 0),
+                            'pending_signals': [
+                                f"{signal_id}: {signal_data.get('status', 'unknown')}"
+                                for signal_id, signal_data in pool_data.get('signals', {}).items()
+                                if signal_data.get('status') == 'pending'
+                            ],
+                            'last_update': current_time
+                        }
                         self._last_resonance_update = current_time
             except Exception as e:
                 logger.error(f"获取共振池状态失败: {e}")
