@@ -322,18 +322,81 @@ class QuickActionsView(View):
             embed.add_field(name="系统状态", value=status_text, inline=False)
             
             # 添加宏观状态
-            macro_text = """宏观：牛
-BTC1d (中性)
-ETH1d (中性)"""
+            macro_status = "未知"
+            btc_status = "未知"
+            eth_status = "未知"
+            
+            # 尝试获取宏观分析器数据
+            if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
+                try:
+                    trading_engine = self.bot.bot_data['trading_engine']
+                    if hasattr(trading_engine, 'get_macro_status'):
+                        macro_data = await trading_engine.get_macro_status()
+                        macro_status = macro_data.get('trend', '未知')
+                        btc_status = macro_data.get('btc1d', '未知')
+                        eth_status = macro_data.get('eth1d', '未知')
+                except Exception as e:
+                    logger.error(f"获取宏观状态失败: {e}")
+            
+            macro_text = f"""宏观：{macro_status}
+BTC1d ({btc_status})
+ETH1d ({eth_status})"""
             embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
             
-            # 添加持仓信息
-            embed.add_field(name="📈 持仓/浮盈", value="🟢 $0.00", inline=False)
-            embed.add_field(name="持仓状态", value="无持仓", inline=False)
+            # 添加分隔线
+            embed.add_field(name="─" * 20, value="─" * 20, inline=False)
             
             # 添加共振池信息
-            embed.add_field(name="⏳ 共振池", value="(0个信号)", inline=False)
-            embed.add_field(name="信号状态", value="无待处理信号", inline=False)
+            signal_count = 0
+            signal_status = "无待处理信号"
+            
+            # 尝试获取共振池数据
+            if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
+                try:
+                    trading_engine = self.bot.bot_data['trading_engine']
+                    if hasattr(trading_engine, 'get_resonance_pool'):
+                        pool_data = await trading_engine.get_resonance_pool()
+                        signal_count = len(pool_data.get('signals', []))
+                        if signal_count > 0:
+                            signal_status = f"有 {signal_count} 个待处理信号"
+                except Exception as e:
+                    logger.error(f"获取共振池状态失败: {e}")
+            
+            embed.add_field(name="⏳ 共振池", value=f"({signal_count}个信号)", inline=False)
+            embed.add_field(name="信号状态", value=signal_status, inline=False)
+            
+            # 添加分隔线
+            embed.add_field(name="─" * 20, value="─" * 20, inline=False)
+            
+            # 添加持仓信息
+            pnl_text = "🟢 $0.00"
+            position_text = "无持仓"
+            
+            # 尝试获取持仓数据
+            if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
+                try:
+                    trading_engine = self.bot.bot_data['trading_engine']
+                    positions = await trading_engine.get_position("*")
+                    if positions:
+                        total_pnl = 0.0
+                        position_lines = []
+                        for symbol, position in positions.items():
+                            size = float(position.get('size', 0))
+                            if size != 0:
+                                pnl = float(position.get('pnl', 0))
+                                total_pnl += pnl
+                                side = "多头" if size > 0 else "空头"
+                                position_lines.append(f"{symbol} ({side}): {abs(size)}")
+                        
+                        if total_pnl != 0:
+                            pnl_text = f"{'🟢' if total_pnl >= 0 else '🔴'} ${abs(total_pnl):.2f}"
+                        if position_lines:
+                            position_text = "\n".join(position_lines)
+                except Exception as e:
+                    logger.error(f"获取持仓信息失败: {e}")
+            
+            embed.add_field(name="📈 持仓/浮盈", value=pnl_text, inline=False)
+            embed.add_field(name="持仓状态", value=position_text, inline=False)
             
             # 添加报警状态
             if hasattr(self.bot, 'bot_data') and 'alert_system' in self.bot.bot_data:
