@@ -287,6 +287,15 @@ class QuickActionsView(View):
         self.positions_button.callback = self.view_positions
         self.add_item(self.positions_button)
         
+        # 报警历史按钮
+        self.alerts_button = Button(
+            label="🚨 报警",
+            style=discord.ButtonStyle.secondary,
+            custom_id="view_alerts"
+        )
+        self.alerts_button.callback = self.view_alerts
+        self.add_item(self.alerts_button)
+        
         # 保存按钮
         self.save_button = Button(
             label="💾 保存",
@@ -295,15 +304,6 @@ class QuickActionsView(View):
         )
         self.save_button.callback = self.save_config
         self.add_item(self.save_button)
-        
-        # 日志按钮
-        self.log_button = Button(
-            label="📝 日志",
-            style=discord.ButtonStyle.secondary,
-            custom_id="view_logs"
-        )
-        self.log_button.callback = self.view_logs
-        self.add_item(self.log_button)
     
     async def refresh_status(self, interaction: discord.Interaction):
         """刷新状态"""
@@ -335,6 +335,14 @@ ETH1d (中性)"""
             embed.add_field(name="⏳ 共振池", value="(0个信号)", inline=False)
             embed.add_field(name="信号状态", value="无待处理信号", inline=False)
             
+            # 添加报警状态
+            if hasattr(self.bot, 'bot_data') and 'alert_system' in self.bot.bot_data:
+                alert_status = self.bot.bot_data['alert_system'].get_status()
+                alert_emoji = "🔴" if alert_status['active'] else "🟢"
+                embed.add_field(name=f"报警状态 {alert_emoji}", 
+                              value=f"最近报警: {alert_status.get('last_alert', '无')}", 
+                              inline=False)
+            
             # 使用 followup 发送实际响应
             await interaction.followup.send(embed=embed, ephemeral=True)
             
@@ -359,12 +367,35 @@ ETH1d (中性)"""
             # 先发送延迟响应
             await interaction.response.defer(ephemeral=True)
             
-            # 这里添加查看持仓逻辑
+            # 获取交易引擎实例
+            trading_engine = None
+            if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
+                trading_engine = self.bot.bot_data['trading_engine']
+            
+            # 创建持仓信息嵌入消息
             embed = discord.Embed(
                 title="📊 当前持仓",
-                description="暂无持仓信息",
                 color=discord.Color.blue()
             )
+            
+            if trading_engine:
+                # 获取所有持仓
+                positions = await trading_engine.get_position("*")
+                if positions:
+                    for symbol, position in positions.items():
+                        size = float(position.get('size', 0))
+                        if size != 0:
+                            side = "多头" if size > 0 else "空头"
+                            pnl = float(position.get('pnl', 0))
+                            embed.add_field(
+                                name=f"{symbol} ({side})",
+                                value=f"数量: {abs(size)}\n浮盈: ${pnl:.2f}",
+                                inline=True
+                            )
+                else:
+                    embed.description = "暂无持仓"
+            else:
+                embed.description = "交易引擎未初始化"
             
             # 使用 followup 发送实际响应
             await interaction.followup.send(embed=embed, ephemeral=True)
@@ -379,6 +410,50 @@ ETH1d (中性)"""
                     await interaction.response.send_message("查看持仓失败，请稍后重试", ephemeral=True)
                 else:
                     await interaction.followup.send("查看持仓失败，请稍后重试", ephemeral=True)
+            except Exception as followup_error:
+                logger.error(f"发送错误消息失败: {followup_error}")
+    
+    async def view_alerts(self, interaction: discord.Interaction):
+        """查看报警历史"""
+        try:
+            # 先发送延迟响应
+            await interaction.response.defer(ephemeral=True)
+            
+            # 创建报警历史嵌入消息
+            embed = discord.Embed(
+                title="📋 报警历史",
+                color=discord.Color.blue()
+            )
+            
+            # 获取报警系统实例
+            if hasattr(self.bot, 'bot_data') and 'alert_system' in self.bot.bot_data:
+                alerts = self.bot.bot_data['alert_system'].get_alerts()
+                if alerts:
+                    for alert in alerts[-5:]:  # 显示最近5条报警
+                        timestamp = int(alert['timestamp'])
+                        embed.add_field(
+                            name=f"{alert['type']} ({alert['level']})",
+                            value=f"{alert['message']}\n<t:{timestamp}:R>",
+                            inline=False
+                        )
+                else:
+                    embed.description = "暂无报警记录"
+            else:
+                embed.description = "报警系统未初始化"
+            
+            # 使用 followup 发送实际响应
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+            # 记录日志
+            logger.info(f"用户 {interaction.user} 查看了报警历史")
+            
+        except Exception as e:
+            logger.error(f"查看报警历史失败: {e}", exc_info=True)
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("查看报警历史失败，请稍后重试", ephemeral=True)
+                else:
+                    await interaction.followup.send("查看报警历史失败，请稍后重试", ephemeral=True)
             except Exception as followup_error:
                 logger.error(f"发送错误消息失败: {followup_error}")
     
@@ -404,42 +479,6 @@ ETH1d (中性)"""
                     await interaction.response.send_message("❌ 保存失败，请稍后重试", ephemeral=True)
                 else:
                     await interaction.followup.send("❌ 保存失败，请稍后重试", ephemeral=True)
-            except Exception as followup_error:
-                logger.error(f"发送错误消息失败: {followup_error}")
-    
-    async def view_logs(self, interaction: discord.Interaction):
-        """查看日志"""
-        try:
-            # 先发送延迟响应
-            await interaction.response.defer(ephemeral=True)
-            
-            # 这里添加查看日志逻辑
-            embed = discord.Embed(
-                title="📝 系统日志",
-                description="最近日志信息",
-                color=discord.Color.blue()
-            )
-            
-            # 添加一些示例日志
-            embed.add_field(
-                name="最近活动",
-                value="系统运行正常",
-                inline=False
-            )
-            
-            # 使用 followup 发送实际响应
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            
-            # 记录日志
-            logger.info(f"用户 {interaction.user} 查看了系统日志")
-            
-        except Exception as e:
-            logger.error(f"查看日志失败: {e}", exc_info=True)
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("查看日志失败，请稍后重试", ephemeral=True)
-                else:
-                    await interaction.followup.send("查看日志失败，请稍后重试", ephemeral=True)
             except Exception as followup_error:
                 logger.error(f"发送错误消息失败: {followup_error}")
 
