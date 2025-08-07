@@ -348,22 +348,24 @@ ETH1d ({eth_status})"""
             
             # 添加共振池信息
             signal_count = 0
-            signal_status = "无待处理信号"
+            pending_signals = []
             
             # 尝试获取共振池数据
             if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
                 try:
                     trading_engine = self.bot.bot_data['trading_engine']
-                    if hasattr(trading_engine, 'get_resonance_pool'):
-                        pool_data = await trading_engine.get_resonance_pool()
-                        signal_count = len(pool_data.get('signals', []))
-                        if signal_count > 0:
-                            signal_status = f"有 {signal_count} 个待处理信号"
+                    if hasattr(trading_engine, 'get_resonance_status'):
+                        resonance_data = await trading_engine.get_resonance_status()
+                        signal_count = resonance_data.get('signal_count', 0)
+                        pending_signals = resonance_data.get('pending_signals', [])
                 except Exception as e:
                     logger.error(f"获取共振池状态失败: {e}")
             
             embed.add_field(name="⏳ 共振池", value=f"({signal_count}个信号)", inline=False)
-            embed.add_field(name="信号状态", value=signal_status, inline=False)
+            if pending_signals:
+                embed.add_field(name="待处理信号", value="\n".join(pending_signals), inline=False)
+            else:
+                embed.add_field(name="待处理信号", value="无待处理信号", inline=False)
             
             # 添加分隔线
             embed.add_field(name="─" * 20, value="─" * 20, inline=False)
