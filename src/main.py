@@ -89,7 +89,7 @@ async def save_tv_status(symbol: str, status: str):
             await conn.execute(text('''
                 INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
                 VALUES (?, ?, ?)
-            ''', (symbol, status, time.time()))
+            '''), (symbol, status, time.time()))
             await conn.commit()
         finally:
             await conn.close()
