@@ -36,6 +36,12 @@ class Config(BaseSettings):
     alert_api_retry_count: int = Field(default=3, env="ALERT_API_RETRY_COUNT")  # API重试次数
     alert_cooldown_period: int = Field(default=300, env="ALERT_COOLDOWN_PERIOD")  # 报警冷却时间（秒）
 
+    # 共振池配置
+    resonance_pool_size: int = Field(default=100, env="RESONANCE_POOL_SIZE")  # 共振池大小
+    resonance_signal_threshold: float = Field(default=0.7, env="RESONANCE_SIGNAL_THRESHOLD")  # 信号阈值
+    resonance_max_pending_signals: int = Field(default=10, env="RESONANCE_MAX_PENDING_SIGNALS")  # 最大待处理信号数
+    resonance_update_interval: int = Field(default=60, env="RESONANCE_UPDATE_INTERVAL")  # 更新间隔（秒）
+
     class Config:
         # 允许额外的字段，这样可以在不修改代码的情况下添加新的配置
         extra = "allow"
@@ -113,6 +119,34 @@ class Config(BaseSettings):
         """验证报警冷却时间"""
         if not 60 <= v <= 3600:
             raise ValueError("报警冷却时间必须在60-3600秒之间")
+        return v
+
+    @validator('resonance_pool_size')
+    def validate_resonance_pool_size(cls, v):
+        """验证共振池大小"""
+        if not 10 <= v <= 1000:
+            raise ValueError("共振池大小必须在10-1000之间")
+        return v
+
+    @validator('resonance_signal_threshold')
+    def validate_resonance_signal_threshold(cls, v):
+        """验证信号阈值"""
+        if not 0.1 <= v <= 1.0:
+            raise ValueError("信号阈值必须在0.1-1.0之间")
+        return v
+
+    @validator('resonance_max_pending_signals')
+    def validate_resonance_max_pending_signals(cls, v):
+        """验证最大待处理信号数"""
+        if not 1 <= v <= 50:
+            raise ValueError("最大待处理信号数必须在1-50之间")
+        return v
+
+    @validator('resonance_update_interval')
+    def validate_resonance_update_interval(cls, v):
+        """验证更新间隔"""
+        if not 30 <= v <= 300:
+            raise ValueError("更新间隔必须在30-300秒之间")
         return v
 
 # 创建全局配置实例
