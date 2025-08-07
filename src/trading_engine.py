@@ -29,6 +29,10 @@ class TradingEngine:
         # 新增：共振池数据
         self.resonance_pool: Dict[str, Dict] = {}
         self.signal_timeout = 300  # 信号超时时间（5分钟）
+        
+        # 新增：宏观状态缓存
+        self._macro_status: Optional[Dict[str, Any]] = None
+        self._last_macro_update: float = 0
     
     async def execute_order(self, symbol: str, order_type: str, side: str, 
                           amount: float, price: Optional[float] = None) -> Dict[str, Any]:
@@ -288,6 +292,8 @@ class TradingEngine:
             if signal_data['status'] == 'pending'
         ]
         
+        logger.info(f"共振池状态: 信号总数={len(self.resonance_pool)}, 待处理={len(pending_signals)}")
+        
         return {
             'signals': self.resonance_pool,
             'count': len(self.resonance_pool),
@@ -314,3 +320,37 @@ class TradingEngine:
         
         if expired_count > 0:
             logger.info(f"清理了 {expired_count} 个过期信号")
+    
+    # 新增：获取宏观状态方法
+    async def get_macro_status(self) -> Dict[str, Any]:
+        """获取宏观状态信息"""
+        current_time = time.time()
+        
+        # 如果缓存不存在或过期（超过5分钟），返回默认值
+        if (not self._macro_status or 
+            current_time - self._last_macro_update > 300):
+            
+            logger.info("宏观状态缓存过期，返回默认值")
+            self._macro_status = {
+                'trend': '未知',
+                'btc1d': '未知',
+                'eth1d': '未知',
+                'confidence': 0,
+                'last_update': current_time
+            }
+            self._last_macro_update = current_time
+        
+        return self._macro_status.copy()
+    
+    # 新增：更新宏观状态方法
+    def update_macro_status(self, trend: str, btc1d: str, eth1d: str, confidence: float = 0) -> None:
+        """更新宏观状态信息"""
+        self._macro_status = {
+            'trend': trend,
+            'btc1d': btc1d,
+            'eth1d': eth1d,
+            'confidence': confidence,
+            'last_update': time.time()
+        }
+        self._last_macro_update = time.time()
+        logger.info(f"更新宏观状态: {trend}, BTC1d: {btc1d}, ETH1d: {eth1d}")
