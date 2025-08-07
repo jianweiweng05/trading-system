@@ -91,7 +91,7 @@ async def start_discord_bot() -> Optional[Any]:
         
         # 启动黑天鹅雷达
         radar_task = await safe_start_task(
-            start_black_swan_radar(),
+            start_black_swan_radar,
             "黑天鹅雷达"
         )
         logger.info("✅ 黑天鹅雷达已启动")
@@ -199,7 +199,7 @@ async def lifespan(app: FastAPI):
         
         # 6. 启动黑天鹅雷达
         radar_task = await safe_start_task(
-            start_black_swan_radar(),
+            start_black_swan_radar,
             "黑天鹅雷达"
         )
         logger.info("✅ 黑天鹅雷达已启动")
@@ -237,10 +237,8 @@ async def lifespan(app: FastAPI):
                 logger.error(f"关闭报警系统失败: {e}")
         
         if trading_engine:
-            try:
-                await trading_engine.stop()
-            except Exception as e:
-                logger.error(f"关闭交易引擎失败: {e}")
+            trading_engine = None
+            logger.info("✅ 交易引擎已关闭")
         
         if hasattr(app.state, 'exchange'):
             try:
