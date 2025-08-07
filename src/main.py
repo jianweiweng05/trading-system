@@ -47,7 +47,7 @@ async def init_tv_status_table():
         from src.database import db_pool
         conn = db_pool.get_simple_session()
         try:
-            await conn.execute('''
+            await conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS tv_status (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     symbol VARCHAR(10) NOT NULL UNIQUE,
@@ -55,7 +55,7 @@ async def init_tv_status_table():
                     timestamp REAL NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            ''')
+            '''))
             await conn.commit()
         finally:
             await conn.close()
@@ -70,7 +70,7 @@ async def load_tv_status() -> Dict[str, str]:
         from src.database import db_pool
         conn = db_pool.get_simple_session()
         try:
-            cursor = await conn.execute('SELECT symbol, status FROM tv_status')
+            cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
             rows = await cursor.fetchall()
             for row in rows:
                 status[row['symbol']] = row['status']
@@ -86,7 +86,7 @@ async def save_tv_status(symbol: str, status: str):
         from src.database import db_pool
         conn = db_pool.get_simple_session()
         try:
-            await conn.execute('''
+            await conn.execute(text('''
                 INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
                 VALUES (?, ?, ?)
             ''', (symbol, status, time.time()))
