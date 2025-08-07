@@ -68,7 +68,7 @@ async def start_discord_bot() -> Optional[Any]:
         
         # 初始化数据库连接池
         from src.database import init_db
-        db_task = asyncio.create_task(init_db)
+        db_task = asyncio.create_task(init_db())
         await db_task
         logger.info("✅ 数据库连接已建立")
         
@@ -143,7 +143,7 @@ async def lifespan(app: FastAPI):
         
         # 1. 并行初始化数据库和交易所连接
         from src.database import init_db
-        db_task = asyncio.create_task(init_db)
+        db_task = asyncio.create_task(init_db())
         await db_task
         logger.info("✅ 数据库连接已建立")
         
