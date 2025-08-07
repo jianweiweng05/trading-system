@@ -23,3 +23,11 @@ services:
         value: "3"
       - key: EXCHANGE_RETRY_DELAY
         value: "5"
+
+services:
+  - type: web
+    name: trading-system-v7
+    disk:
+      name: tradingsystemv7-data  
+      mountPath: /opt/render/project/persistent  
+      sizeGB: 1  
