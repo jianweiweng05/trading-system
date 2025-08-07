@@ -73,13 +73,53 @@ class TradingCommands(commands.Cog, name="交易系统"):
         self.bot.bot_data: Dict[str, Any] = {
             'exchange': None,
             'db_pool': None,
-            'alert_system': None  # 添加报警系统引用
+            'alert_system': None,  # 添加报警系统引用
+            'trading_engine': None  # 添加交易引擎引用
         }
         self.alert_status = {
             'active': False,
             'last_alert': None,
             'alert_count': 0,
             'alerts': {}  # 添加报警历史记录
+        }
+        # 添加宏观状态缓存
+        self._macro_status: Optional[Dict[str, Any]] = None
+        self._last_macro_update: float = 0
+    
+    # 新增：获取宏观状态方法
+    async def get_macro_status(self) -> Dict[str, Any]:
+        """获取宏观状态信息"""
+        current_time = asyncio.get_event_loop().time()
+        
+        # 如果缓存不存在或过期（超过5分钟），重新获取
+        if (not self._macro_status or 
+            current_time - self._last_macro_update > 300):
+            
+            logger.info("更新宏观状态缓存...")
+            try:
+                if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
+                    trading_engine = self.bot.bot_data['trading_engine']
+                    if hasattr(trading_engine, 'get_macro_status'):
+                        self._macro_status = await trading_engine.get_macro_status()
+                        self._last_macro_update = current_time
+            except Exception as e:
+                logger.error(f"获取宏观状态失败: {e}")
+                # 如果获取失败，返回默认值
+                if not self._macro_status:
+                    self._macro_status = {
+                        'trend': '未知',
+                        'btc1d': '未知',
+                        'eth1d': '未知',
+                        'confidence': 0,
+                        'last_update': current_time
+                    }
+        
+        return self._macro_status.copy() if self._macro_status else {
+            'trend': '未知',
+            'btc1d': '未知',
+            'eth1d': '未知',
+            'confidence': 0,
+            'last_update': current_time
         }
     
     # 旧版文本命令（!status）
@@ -94,6 +134,13 @@ class TradingCommands(commands.Cog, name="交易系统"):
             embed.add_field(name="运行模式", value=CONFIG.run_mode)
             embed.add_field(name="Bot状态", value="🟢 在线")
             embed.add_field(name="延迟", value=f"{round(self.bot.latency * 1000)} ms")
+            
+            # 添加宏观状态
+            macro_status = await self.get_macro_status()
+            macro_text = f"""宏观：{macro_status['trend']}
+BTC1d ({macro_status['btc1d']})
+ETH1d ({macro_status['eth1d']})"""
+            embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
             
             # 添加报警状态显示
             alert_status = "🟢 正常" if not self.alert_status['active'] else "🔴 报警中"
@@ -124,6 +171,13 @@ class TradingCommands(commands.Cog, name="交易系统"):
             embed.add_field(name="运行模式", value=CONFIG.run_mode)
             embed.add_field(name="Bot状态", value="🟢 在线")
             embed.add_field(name="延迟", value=f"{round(self.bot.latency * 1000)} ms")
+            
+            # 添加宏观状态
+            macro_status = await self.get_macro_status()
+            macro_text = f"""宏观：{macro_status['trend']}
+BTC1d ({macro_status['btc1d']})
+ETH1d ({macro_status['eth1d']})"""
+            embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
             
             # 添加报警状态显示
             alert_status = "🟢 正常" if not self.alert_status['active'] else "🔴 报警中"
