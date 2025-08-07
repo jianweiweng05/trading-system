@@ -1,3 +1,4 @@
+
 import logging
 import asyncio
 import time
@@ -6,8 +7,10 @@ import hashlib
 import os
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
+
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from ccxt.async_support import binance
 import uvicorn
 
