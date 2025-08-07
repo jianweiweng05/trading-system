@@ -40,6 +40,49 @@ startup_complete: bool = False
 alert_system: Optional[AlertSystem] = None
 trading_engine: Optional[TradingEngine] = None
 
+# --- TV状态数据库操作 ---
+async def init_tv_status_table():
+    """初始化TV状态表"""
+    from src.database import get_db_connection
+    async with get_db_connection() as conn:
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS tv_status (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol VARCHAR(10) NOT NULL UNIQUE,
+                status VARCHAR(20) NOT NULL,
+                timestamp REAL NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        await conn.commit()
+
+async def load_tv_status() -> Dict[str, str]:
+    """从数据库加载TV状态"""
+    from src.database import get_db_connection
+    status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
+    try:
+        async with get_db_connection() as conn:
+            cursor = await conn.execute('SELECT symbol, status FROM tv_status')
+            rows = await cursor.fetchall()
+            for row in rows:
+                status[row['symbol']] = row['status']
+    except Exception as e:
+        logger.error(f"加载TV状态失败: {e}")
+    return status
+
+async def save_tv_status(symbol: str, status: str):
+    """保存TV状态到数据库"""
+    from src.database import get_db_connection
+    try:
+        async with get_db_connection() as conn:
+            await conn.execute('''
+                INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
+                VALUES (?, ?, ?)
+            ''', (symbol, status, time.time()))
+            await conn.commit()
+    except Exception as e:
+        logger.error(f"保存TV状态失败: {e}")
+
 # --- Discord Bot 启动函数 ---
 async def start_discord_bot() -> Optional[Any]:
     """启动Discord机器人的异步函数"""
@@ -146,7 +189,11 @@ async def lifespan(app: FastAPI):
         await db_task
         logger.info("✅ 数据库连接已建立")
         
-        # 2. 初始化交易所连接（重试机制）
+        # 2. 初始化TV状态表
+        await init_tv_status_table()
+        logger.info("✅ TV状态表已初始化")
+        
+        # 3. 初始化交易所连接（重试机制）
         exchange = binance({
             'apiKey': CONFIG.binance_api_key,
             'secret': CONFIG.binance_api_secret,
@@ -171,7 +218,7 @@ async def lifespan(app: FastAPI):
                     logger.warning(f"⚠️ 达到最大重试次数，放弃连接")
                     raise
         
-        # 3. 初始化报警系统
+        # 4. 初始化报警系统
         if CONFIG.discord_alert_webhook:
             app.state.alert_system = AlertSystem(
                 webhook_url=CONFIG.discord_alert_webhook,
@@ -184,11 +231,11 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ 未配置Discord webhook，报警系统将不会启动")
             app.state.alert_system = None
         
-        # 4. 初始化 AI 分析器
+        # 5. 初始化 AI 分析器
         app.state.macro_analyzer = MacroAnalyzer(api_key=CONFIG.deepseek_api_key)
         logger.info("✅ 宏观分析器已初始化")
         
-        # 5. 初始化交易引擎
+        # 6. 初始化交易引擎
         if CONFIG.trading_engine:
             app.state.trading_engine = TradingEngine(
                 exchange=exchange,
@@ -197,14 +244,14 @@ async def lifespan(app: FastAPI):
             trading_engine = app.state.trading_engine
             logger.info("✅ 交易引擎已启动")
         
-        # 6. 启动黑天鹅雷达
+        # 7. 启动黑天鹅雷达
         radar_task = await safe_start_task(
             start_black_swan_radar,
             "黑天鹅雷达"
         )
         logger.info("✅ 黑天鹅雷达已启动")
         
-        # 7. 设置系统状态
+        # 8. 设置系统状态
         await SystemState.set_state("ACTIVE")
         startup_complete = True
         logger.info("🚀 系统启动完成")
@@ -390,6 +437,48 @@ async def startup_check() -> Dict[str, Any]:
         "status": "ok" if all(checks["components"].values()) else "degraded",
         "timestamp": time.time()
     }
+
+@app.post("/webhook/tradingview")
+async def tradingview_webhook(request: Request):
+    """TradingView Webhook接收端点"""
+    try:
+        # 获取请求体
+        data = await request.json()
+        
+        # 验证webhook密钥
+        if 'secret' not in data or data['secret'] != CONFIG.tv_webhook_secret:
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
+        
+        # 解析警报数据
+        symbol = data.get('symbol', '').lower()
+        action = data.get('action', '').lower()
+        
+        # 更新状态
+        if symbol in ['btc', 'eth'] and action in ['buy', 'sell', 'neutral']:
+            await save_tv_status(symbol, action)
+            logger.info(f"更新 {symbol} 状态为: {action}")
+            
+            return {"status": "success", "message": f"Updated {symbol} status to {action}"}
+        else:
+            raise HTTPException(status_code=400, detail="Invalid symbol or action")
+            
+    except Exception as e:
+        logger.error(f"TradingView webhook处理失败: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.get("/tv-status")
+async def get_tv_status():
+    """获取TradingView状态"""
+    try:
+        status = await load_tv_status()
+        return {
+            "btc": status['btc'],
+            "eth": status['eth'],
+            "last_update": time.time()
+        }
+    except Exception as e:
+        logger.error(f"获取TV状态失败: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # --- 主函数 ---
 if __name__ == "__main__":
