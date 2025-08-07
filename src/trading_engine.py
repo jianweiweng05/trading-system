@@ -25,6 +25,10 @@ class TradingEngine:
         self.daily_pnl = 0.0
         self.daily_trades = 0
         self.last_reset_time = time.time()
+        
+        # 新增：共振池数据
+        self.resonance_pool: Dict[str, Dict] = {}
+        self.signal_timeout = 300  # 信号超时时间（5分钟）
     
     async def execute_order(self, symbol: str, order_type: str, side: str, 
                           amount: float, price: Optional[float] = None) -> Dict[str, Any]:
@@ -248,3 +252,65 @@ class TradingEngine:
             'trades': self.daily_trades,
             'last_reset': self.last_reset_time
         }
+    
+    # 新增：共振池管理方法
+    def add_signal(self, signal_id: str, signal_data: Dict[str, Any]) -> None:
+        """添加信号到共振池"""
+        self.resonance_pool[signal_id] = {
+            **signal_data,
+            'timestamp': time.time(),
+            'status': 'pending'
+        }
+        logger.info(f"添加信号到共振池: {signal_id}")
+    
+    def remove_signal(self, signal_id: str) -> None:
+        """从共振池移除信号"""
+        if signal_id in self.resonance_pool:
+            del self.resonance_pool[signal_id]
+            logger.info(f"从共振池移除信号: {signal_id}")
+    
+    def get_resonance_pool(self) -> Dict[str, Any]:
+        """获取共振池状态"""
+        current_time = time.time()
+        
+        # 清理过期信号
+        expired_signals = [
+            signal_id for signal_id, signal_data in self.resonance_pool.items()
+            if current_time - signal_data['timestamp'] > self.signal_timeout
+        ]
+        
+        for signal_id in expired_signals:
+            self.remove_signal(signal_id)
+        
+        # 统计信号状态
+        pending_signals = [
+            signal_data for signal_data in self.resonance_pool.values()
+            if signal_data['status'] == 'pending'
+        ]
+        
+        return {
+            'signals': self.resonance_pool,
+            'count': len(self.resonance_pool),
+            'pending_count': len(pending_signals),
+            'last_update': current_time
+        }
+    
+    def update_signal_status(self, signal_id: str, status: str) -> None:
+        """更新信号状态"""
+        if signal_id in self.resonance_pool:
+            self.resonance_pool[signal_id]['status'] = status
+            self.resonance_pool[signal_id]['updated_at'] = time.time()
+            logger.info(f"更新信号状态: {signal_id} -> {status}")
+    
+    def clear_expired_signals(self) -> None:
+        """清理过期信号"""
+        current_time = time.time()
+        expired_count = 0
+        
+        for signal_id in list(self.resonance_pool.keys()):
+            if current_time - self.resonance_pool[signal_id]['timestamp'] > self.signal_timeout:
+                self.remove_signal(signal_id)
+                expired_count += 1
+        
+        if expired_count > 0:
+            logger.info(f"清理了 {expired_count} 个过期信号")
