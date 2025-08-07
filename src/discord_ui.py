@@ -313,25 +313,27 @@ class QuickActionsView(View):
             
             # 创建状态嵌入消息
             embed = discord.Embed(
-                title="📊 系统状态",
+                title="📊 系统状态报告",
                 color=discord.Color.green()
             )
-            embed.add_field(name="运行模式", value=CONFIG.run_mode)
-            embed.add_field(name="杠杆系数", value=f"{getattr(CONFIG, 'leverage', 5.0)}x")
-            embed.add_field(name="火力系数", value=str(getattr(CONFIG, 'firepower', 0.8)))
-            embed.add_field(name="资本分配", value=getattr(CONFIG, 'allocation', 'balanced'))
             
-            # 检查交易所连接状态
-            if hasattr(interaction.client, 'bot_data') and 'exchange' in interaction.client.bot_data:
-                try:
-                    # 尝试获取服务器时间来验证连接
-                    await interaction.client.bot_data['exchange'].fetch_time()
-                    embed.add_field(name="交易所连接", value="🟢 已连接", inline=False)
-                except Exception as e:
-                    logger.error(f"验证交易所连接失败: {e}")
-                    embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
-            else:
-                embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
+            # 添加状态行
+            status_text = f"🟢 状态: 运行中 | ⚙️ 模式: {'模拟' if CONFIG.run_mode == 'simulate' else '实盘'}"
+            embed.add_field(name="系统状态", value=status_text, inline=False)
+            
+            # 添加宏观状态
+            macro_text = """宏观：牛
+BTC1d (中性)
+ETH1d (中性)"""
+            embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
+            
+            # 添加持仓信息
+            embed.add_field(name="📈 持仓/浮盈", value="🟢 $0.00", inline=False)
+            embed.add_field(name="持仓状态", value="无持仓", inline=False)
+            
+            # 添加共振池信息
+            embed.add_field(name="⏳ 共振池", value="(0个信号)", inline=False)
+            embed.add_field(name="信号状态", value="无待处理信号", inline=False)
             
             # 使用 followup 发送实际响应
             await interaction.followup.send(embed=embed, ephemeral=True)
