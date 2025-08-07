@@ -72,12 +72,14 @@ class TradingCommands(commands.Cog, name="交易系统"):
         self.bot = bot
         self.bot.bot_data: Dict[str, Any] = {
             'exchange': None,
-            'db_pool': None
+            'db_pool': None,
+            'alert_system': None  # 添加报警系统引用
         }
         self.alert_status = {
             'active': False,
             'last_alert': None,
-            'alert_count': 0
+            'alert_count': 0,
+            'alerts': {}  # 添加报警历史记录
         }
     
     # 旧版文本命令（!status）
@@ -98,6 +100,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
             embed.add_field(name="报警状态", value=alert_status, inline=False)
             if self.alert_status['last_alert']:
                 embed.add_field(name="最近报警", value=self.alert_status['last_alert'], inline=False)
+            embed.add_field(name="总报警次数", value=str(self.alert_status['alert_count']), inline=True)
             
             await ctx.send(embed=embed)
             logger.info(f"✅ 用户 {ctx.author} 查看了系统状态")
@@ -127,6 +130,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
             embed.add_field(name="报警状态", value=alert_status, inline=False)
             if self.alert_status['last_alert']:
                 embed.add_field(name="最近报警", value=self.alert_status['last_alert'], inline=False)
+            embed.add_field(name="总报警次数", value=str(self.alert_status['alert_count']), inline=True)
             
             # 使用 followup 发送实际响应
             await interaction.followup.send(embed=embed, ephemeral=True)
@@ -145,25 +149,145 @@ class TradingCommands(commands.Cog, name="交易系统"):
                 logger.error(f"发送错误消息失败: {followup_error}")
 
     # 新增：报警触发方法
-    async def trigger_alert(self, alert_type: str, message: str):
+    async def trigger_alert(self, alert_type: str, message: str, level: str = "warning"):
         """触发报警"""
+        # 更新报警状态
         self.alert_status['active'] = True
         self.alert_status['last_alert'] = f"{alert_type}: {message}"
         self.alert_status['alert_count'] += 1
         
+        # 记录报警历史
+        self.alert_status['alerts'][alert_type] = {
+            'message': message,
+            'timestamp': asyncio.get_event_loop().time(),
+            'level': level
+        }
+        
         # 发送报警消息到指定频道
         channel = self.bot.get_channel(int(CONFIG.discord_channel_id))
         if channel:
+            # 根据报警级别选择颜色
+            color_map = {
+                'emergency': discord.Color.red(),
+                'warning': discord.Color.orange(),
+                'info': discord.Color.blue()
+            }
+            color = color_map.get(level, discord.Color.red())
+            
+            # 根据报警类型选择标题图标
+            icon_map = {
+                'ORDER_FAILED': '🚨',
+                'ORDER_TIMEOUT': '⚠️',
+                'PARTIAL_FILL': '⚠️',
+                'INSUFFICIENT_FUNDS': '❌',
+                'HIGH_SLIPPAGE': '⚠️',
+                'EXCHANGE_ERROR': '🔴',
+                'STRATEGY_ERROR': '🚨'
+            }
+            icon = icon_map.get(alert_type, '⚠️')
+            
             embed = discord.Embed(
-                title="⚠️ 系统报警",
+                title=f"{icon} 系统报警",
                 description=message,
-                color=discord.Color.red()
+                color=color
             )
-            embed.add_field(name="报警类型", value=alert_type)
-            embed.add_field(name="报警次数", value=str(self.alert_status['alert_count']))
+            embed.add_field(name="报警类型", value=alert_type, inline=True)
+            embed.add_field(name="报警级别", value=level.upper(), inline=True)
+            embed.add_field(name="报警次数", value=str(self.alert_status['alert_count']), inline=True)
+            
+            # 添加处理建议
+            suggestions = {
+                'ORDER_FAILED': "① 检查API配额 ② 切换备用账号",
+                'ORDER_TIMEOUT': "① 撤单改价 ② 改市价单",
+                'PARTIAL_FILL': "① 补单 ② 撤单",
+                'INSUFFICIENT_FUNDS': "① 充值 ② 降低仓位",
+                'HIGH_SLIPPAGE': "① 检查流动性 ② 调整滑点容忍度",
+                'EXCHANGE_ERROR': "① 检查VPN ② 切换备用交易所",
+                'STRATEGY_ERROR': "① 暂停策略 ② 检查参数"
+            }
+            if alert_type in suggestions:
+                embed.add_field(name="处理建议", value=suggestions[alert_type], inline=False)
+            
             await channel.send(embed=embed)
         
+        # 如果有报警系统实例，也触发报警
+        if self.bot.bot_data.get('alert_system'):
+            try:
+                await self.bot.bot_data['alert_system'].trigger_alert(
+                    alert_type=alert_type,
+                    message=message,
+                    level=level
+                )
+            except Exception as e:
+                logger.error(f"触发报警系统失败: {e}")
+        
         logger.warning(f"触发报警: {alert_type} - {message}")
+
+    # 新增：报警历史命令
+    @commands.command(name="alerts", help="查看报警历史")
+    async def text_alerts(self, ctx: commands.Context):
+        """查看报警历史 - 文本命令版本"""
+        try:
+            embed = discord.Embed(
+                title="📋 报警历史",
+                color=discord.Color.blue()
+            )
+            
+            if not self.alert_status['alerts']:
+                embed.description = "暂无报警记录"
+            else:
+                for alert_type, alert_data in self.alert_status['alerts'].items():
+                    timestamp = int(alert_data['timestamp'])
+                    embed.add_field(
+                        name=f"{alert_type} ({alert_data['level'].upper()})",
+                        value=f"{alert_data['message']}\n<t:{timestamp}:R>",
+                        inline=False
+                    )
+            
+            await ctx.send(embed=embed)
+            logger.info(f"✅ 用户 {ctx.author} 查看了报警历史")
+        except Exception as e:
+            logger.error(f"alerts 命令执行失败: {e}")
+            if not ctx.response.is_done():
+                await ctx.send("❌ 获取报警历史失败", ephemeral=True)
+
+    # 新增：报警历史 Slash 命令
+    @app_commands.command(name="alerts", description="查看报警历史")
+    async def slash_alerts(self, interaction: discord.Interaction):
+        """查看报警历史 - 斜杠命令版本"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+            
+            embed = discord.Embed(
+                title="📋 报警历史",
+                color=discord.Color.blue()
+            )
+            
+            if not self.alert_status['alerts']:
+                embed.description = "暂无报警记录"
+            else:
+                for alert_type, alert_data in self.alert_status['alerts'].items():
+                    timestamp = int(alert_data['timestamp'])
+                    embed.add_field(
+                        name=f"{alert_type} ({alert_data['level'].upper()})",
+                        value=f"{alert_data['message']}\n<t:{timestamp}:R>",
+                        inline=False
+                    )
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            logger.info(f"✅ 用户 {interaction.user} 查看了报警历史")
+            
+        except discord.errors.InteractionResponded:
+            logger.error("交互已响应，无法再次发送响应")
+        except Exception as e:
+            logger.error(f"slash alerts 命令执行失败: {e}")
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("❌ 获取报警历史失败", ephemeral=True)
+                else:
+                    await interaction.followup.send("❌ 获取报警历史失败", ephemeral=True)
+            except Exception as followup_error:
+                logger.error(f"发送错误消息失败: {followup_error}")
 
 # ================= 生命周期管理 =================
 async def initialize_bot(bot: commands.Bot):
