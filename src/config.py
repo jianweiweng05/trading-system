@@ -39,6 +39,11 @@ class Config(BaseSettings):
     # 交易引擎配置
     trading_engine: bool = Field(default=True, env="TRADING_ENGINE")
 
+    # TradingView状态配置
+    default_btc_status: str = Field(default="neutral", env="DEFAULT_BTC_STATUS")
+    default_eth_status: str = Field(default="neutral", env="DEFAULT_ETH_STATUS")
+    status_update_interval: int = Field(default=3600, env="STATUS_UPDATE_INTERVAL")  # 状态更新间隔（秒）
+
     class Config:
         # 允许额外的字段，这样可以在不修改代码的情况下添加新的配置
         extra = "allow"
@@ -116,6 +121,14 @@ class Config(BaseSettings):
         """验证报警冷却时间"""
         if not 60 <= v <= 3600:
             raise ValueError("报警冷却时间必须在60-3600秒之间")
+        return v
+
+    @validator('default_btc_status', 'default_eth_status')
+    def validate_default_status(cls, v):
+        """验证默认状态值"""
+        allowed_values = {"bullish", "bearish", "neutral"}
+        if v not in allowed_values:
+            raise ValueError(f"默认状态必须是以下之一: {allowed_values}")
         return v
 
 # 创建全局配置实例
