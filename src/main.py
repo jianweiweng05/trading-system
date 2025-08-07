@@ -141,7 +141,7 @@ async def lifespan(app: FastAPI):
     try:
         logger.info("🔄 系统启动中...")
         
-        # 1. 并行初始化数据库和交易所连接
+        # 1. 初始化数据库连接
         from src.database import init_db
         db_task = asyncio.create_task(init_db())
         await db_task
@@ -172,21 +172,21 @@ async def lifespan(app: FastAPI):
                     logger.warning(f"⚠️ 达到最大重试次数，放弃连接")
                     raise
         
-        await db_task
-        logger.info("✅ 数据库和交易所连接已建立")
+        # 3. 初始化报警系统
+        if not CONFIG.discord_alert_webhook:
+            raise ValueError("Discord webhook URL未配置")
         
-        # 3. 初始化 AI 分析器
+        app.state.alert_system = AlertSystem(
+            webhook_url=CONFIG.discord_alert_webhook,
+            cooldown_period=CONFIG.alert_cooldown_period
+        )
+        await app.state.alert_system.start()
+        alert_system = app.state.alert_system
+        logger.info("✅ 报警系统已启动")
+        
+        # 4. 初始化 AI 分析器
         app.state.macro_analyzer = MacroAnalyzer(api_key=CONFIG.deepseek_api_key)
         logger.info("✅ 宏观分析器已初始化")
-        
-        # 4. 初始化报警系统
-        if CONFIG.discord_alert_webhook:
-            app.state.alert_system = AlertSystem(
-                webhook_url=CONFIG.discord_alert_webhook,
-                cooldown_period=CONFIG.alert_cooldown_period
-            )
-            await app.state.alert_system.start()
-            logger.info("✅ 报警系统已启动")
         
         # 5. 初始化交易引擎
         if CONFIG.trading_engine:
@@ -195,6 +195,7 @@ async def lifespan(app: FastAPI):
                 alert_system=app.state.alert_system
             )
             await app.state.trading_engine.initialize()
+            trading_engine = app.state.trading_engine
             logger.info("✅ 交易引擎已启动")
         
         # 6. 启动黑天鹅雷达
