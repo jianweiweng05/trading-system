@@ -85,6 +85,9 @@ class TradingCommands(commands.Cog, name="交易系统"):
         # 添加宏观状态缓存
         self._macro_status: Optional[Dict[str, Any]] = None
         self._last_macro_update: float = 0
+        # 添加共振池状态缓存
+        self._resonance_status: Optional[Dict[str, Any]] = None
+        self._last_resonance_update: float = 0
     
     # 新增：获取宏观状态方法
     async def get_macro_status(self) -> Dict[str, Any]:
@@ -121,6 +124,38 @@ class TradingCommands(commands.Cog, name="交易系统"):
             'confidence': 0,
             'last_update': current_time
         }
+
+    # 新增：获取共振池状态方法
+    async def get_resonance_status(self) -> Dict[str, Any]:
+        """获取共振池状态信息"""
+        current_time = asyncio.get_event_loop().time()
+        
+        # 如果缓存不存在或过期（超过1分钟），重新获取
+        if (not self._resonance_status or 
+            current_time - self._last_resonance_update > 60):
+            
+            logger.info("更新共振池状态缓存...")
+            try:
+                if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
+                    trading_engine = self.bot.bot_data['trading_engine']
+                    if hasattr(trading_engine, 'get_resonance_status'):
+                        self._resonance_status = await trading_engine.get_resonance_status()
+                        self._last_resonance_update = current_time
+            except Exception as e:
+                logger.error(f"获取共振池状态失败: {e}")
+                # 如果获取失败，返回默认值
+                if not self._resonance_status:
+                    self._resonance_status = {
+                        'signal_count': 0,
+                        'pending_signals': [],
+                        'last_update': current_time
+                    }
+        
+        return self._resonance_status.copy() if self._resonance_status else {
+            'signal_count': 0,
+            'pending_signals': [],
+            'last_update': current_time
+        }
     
     # 旧版文本命令（!status）
     @commands.command(name="status", help="查看系统状态")
@@ -141,6 +176,15 @@ class TradingCommands(commands.Cog, name="交易系统"):
 BTC1d ({macro_status['btc1d']})
 ETH1d ({macro_status['eth1d']})"""
             embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
+            
+            # 添加共振池状态
+            resonance_status = await self.get_resonance_status()
+            resonance_text = f"⏳ 共振池 ({resonance_status['signal_count']}个信号)\n"
+            if resonance_status['pending_signals']:
+                resonance_text += "待处理信号：\n" + "\n".join(resonance_status['pending_signals'])
+            else:
+                resonance_text += "无待处理信号"
+            embed.add_field(name="🔄 共振池状态", value=resonance_text, inline=False)
             
             # 添加报警状态显示
             alert_status = "🟢 正常" if not self.alert_status['active'] else "🔴 报警中"
@@ -178,6 +222,15 @@ ETH1d ({macro_status['eth1d']})"""
 BTC1d ({macro_status['btc1d']})
 ETH1d ({macro_status['eth1d']})"""
             embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
+            
+            # 添加共振池状态
+            resonance_status = await self.get_resonance_status()
+            resonance_text = f"⏳ 共振池 ({resonance_status['signal_count']}个信号)\n"
+            if resonance_status['pending_signals']:
+                resonance_text += "待处理信号：\n" + "\n".join(resonance_status['pending_signals'])
+            else:
+                resonance_text += "无待处理信号"
+            embed.add_field(name="🔄 共振池状态", value=resonance_text, inline=False)
             
             # 添加报警状态显示
             alert_status = "🟢 正常" if not self.alert_status['active'] else "🔴 报警中"
