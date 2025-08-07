@@ -43,43 +43,56 @@ trading_engine: Optional[TradingEngine] = None
 # --- TV状态数据库操作 ---
 async def init_tv_status_table():
     """初始化TV状态表"""
-    from src.database import get_db_connection
-    async with get_db_connection() as conn:
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS tv_status (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol VARCHAR(10) NOT NULL UNIQUE,
-                status VARCHAR(20) NOT NULL,
-                timestamp REAL NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        await conn.commit()
+    try:
+        from src.database import get_db_connection
+        conn = await get_db_connection().__anext__()
+        try:
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS tv_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol VARCHAR(10) NOT NULL UNIQUE,
+                    status VARCHAR(20) NOT NULL,
+                    timestamp REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+            await conn.commit()
+        finally:
+            await conn.close()
+    except Exception as e:
+        logger.error(f"初始化TV状态表失败: {e}")
+        raise
 
 async def load_tv_status() -> Dict[str, str]:
     """从数据库加载TV状态"""
-    from src.database import get_db_connection
     status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
     try:
-        async with get_db_connection() as conn:
+        from src.database import get_db_connection
+        conn = await get_db_connection().__anext__()
+        try:
             cursor = await conn.execute('SELECT symbol, status FROM tv_status')
             rows = await cursor.fetchall()
             for row in rows:
                 status[row['symbol']] = row['status']
+        finally:
+            await conn.close()
     except Exception as e:
         logger.error(f"加载TV状态失败: {e}")
     return status
 
 async def save_tv_status(symbol: str, status: str):
     """保存TV状态到数据库"""
-    from src.database import get_db_connection
     try:
-        async with get_db_connection() as conn:
+        from src.database import get_db_connection
+        conn = await get_db_connection().__anext__()
+        try:
             await conn.execute('''
                 INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
                 VALUES (?, ?, ?)
             ''', (symbol, status, time.time()))
             await conn.commit()
+        finally:
+            await conn.close()
     except Exception as e:
         logger.error(f"保存TV状态失败: {e}")
 
