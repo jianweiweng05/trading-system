@@ -87,7 +87,6 @@ async def start_discord_bot() -> Optional[Any]:
                 exchange=app.state.exchange,
                 alert_system=app.state.alert_system
             )
-            await app.state.trading_engine.initialize()
             logger.info("✅ 交易引擎已启动")
         
         # 启动黑天鹅雷达
@@ -195,7 +194,6 @@ async def lifespan(app: FastAPI):
                 exchange=exchange,
                 alert_system=app.state.alert_system
             )
-            await app.state.trading_engine.initialize()
             trading_engine = app.state.trading_engine
             logger.info("✅ 交易引擎已启动")
         
