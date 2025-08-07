@@ -19,6 +19,8 @@ from src.system_state import SystemState
 from src.ai.macro_analyzer import MacroAnalyzer
 # --- 新增导入：导入黑天鹅雷达 ---
 from src.ai.black_swan_radar import start_black_swan_radar
+# --- 新增导入：导入报警系统 ---
+from src.alert_system import AlertSystem
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -33,6 +35,7 @@ discord_bot_task: Optional[asyncio.Task] = None
 discord_bot: Optional[Any] = None
 radar_task: Optional[asyncio.Task] = None
 startup_complete: bool = False
+alert_system: Optional[AlertSystem] = None
 
 # --- 辅助函数 (无变动) ---
 def verify_signature(secret: str, signature: str, payload: bytes) -> bool:
@@ -110,7 +113,7 @@ async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
         logger.error(f"{name}启动失败: {e}", exc_info=True)
         return None
 
-# --- 系统状态检查函数 (无变动) ---
+# --- 系统状态检查函数 (修改) ---
 async def check_system_status() -> Dict[str, Any]:
     """检查系统整体状态"""
     status = {
@@ -126,6 +129,16 @@ async def check_system_status() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"系统状态检查失败: {e}", exc_info=True)
         status["components"]["system_state"] = False
+    
+    # 添加报警系统状态检查
+    try:
+        if alert_system:
+            status["components"]["alert_system"] = True
+        else:
+            status["components"]["alert_system"] = False
+    except Exception as e:
+        logger.error(f"报警系统状态检查失败: {e}", exc_info=True)
+        status["components"]["alert_system"] = False
     
     return status
 
@@ -144,6 +157,14 @@ async def graceful_shutdown():
                 logger.warning(f"任务关闭超时")
             except asyncio.CancelledError:
                 logger.info(f"任务已取消")
+    
+    # 关闭报警系统
+    if alert_system:
+        try:
+            await alert_system.stop()
+            logger.info("✅ 报警系统已停止")
+        except Exception as e:
+            logger.error(f"关闭报警系统失败: {e}")
     
     if discord_bot and discord_bot.is_ready():
         try:
@@ -165,7 +186,7 @@ async def graceful_shutdown():
 # --- 生命周期管理 (修改) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global discord_bot_task, discord_bot, radar_task, startup_complete
+    global discord_bot_task, discord_bot, radar_task, startup_complete, alert_system
     exchange = None
     try:
         logger.info("🔄 系统启动中...")
@@ -206,12 +227,21 @@ async def lifespan(app: FastAPI):
         app.state.macro_analyzer = MacroAnalyzer(api_key=CONFIG.deepseek_api_key)
         logger.info("✅ 宏观分析器已实例化")
         
+        # --- 新增内容：初始化报警系统 ---
+        alert_system = AlertSystem(
+            webhook_url=CONFIG.discord_alert_webhook,
+            cooldown_period=CONFIG.alert_cooldown_period
+        )
+        await alert_system.start()
+        logger.info("✅ 报警系统已初始化")
+        
         # 2. 并行启动 Discord Bot 和黑天鹅雷达 (无变动)
         from src.discord_bot import get_bot, initialize_bot
         discord_bot = get_bot()
         discord_bot.bot_data = {
             'exchange': exchange,
-            'config': CONFIG
+            'config': CONFIG,
+            'alert_system': alert_system  # 添加报警系统到bot数据
         }
         
         discord_bot_task = asyncio.create_task(initialize_bot(discord_bot))
@@ -272,7 +302,8 @@ async def health_check() -> Dict[str, Any]:
             "database": False,
             "exchange": False,
             "discord": False,
-            "radar": False
+            "radar": False,
+            "alert_system": False  # 添加报警系统检查
         }
     }
     
@@ -295,6 +326,9 @@ async def health_check() -> Dict[str, Any]:
     if radar_task and not radar_task.done():
         checks["components"]["radar"] = True
     
+    if alert_system and alert_system.is_running:
+        checks["components"]["alert_system"] = True
+    
     checks["status"] = "ok" if all(checks["components"].values()) else "degraded"
     
     return checks
@@ -308,7 +342,8 @@ async def startup_check() -> Dict[str, Any]:
             "db_accessible": False,
             "exchange_ready": False,
             "discord_ready": False,
-            "radar_ready": False
+            "radar_ready": False,
+            "alert_system_ready": False  # 添加报警系统检查
         }
     }
     
@@ -326,6 +361,8 @@ async def startup_check() -> Dict[str, Any]:
             checks["components"]["discord_ready"] = True
         if radar_task and not radar_task.done():
             checks["components"]["radar_ready"] = True
+        if alert_system and alert_system.is_running:
+            checks["components"]["alert_system_ready"] = True
     except Exception as e:
         logger.error(f"启动检查失败: {e}", exc_info=True)
     
@@ -363,12 +400,24 @@ async def tradingview_webhook(request: Request) -> Dict[str, Any]:
             signal_reason = macro_decision["reason"]
             if macro_decision["liquidation_signal"] == "LIQUIDATE_ALL_LONGS":
                 logger.warning(f"宏观清场指令触发: {signal_reason}")
+                # 触发报警
+                if alert_system:
+                    await alert_system.trigger_alert(
+                        alert_type="LIQUIDATION",
+                        message=f"多头清场指令触发: {signal_reason}"
+                    )
                 # 这里应该调用实际的平仓函数
                 # await liquidate_all_positions(app.state.exchange)
                 return {"status": "liquidated_longs", "reason": signal_reason}
                 
             elif macro_decision["liquidation_signal"] == "LIQUIDATE_ALL_SHORTS":
                 logger.warning(f"宏观清场指令触发: {signal_reason}")
+                # 触发报警
+                if alert_system:
+                    await alert_system.trigger_alert(
+                        alert_type="LIQUIDATION",
+                        message=f"空头清场指令触发: {signal_reason}"
+                    )
                 # 这里应该调用实际的平仓函数
                 # await liquidate_all_shorts(app.state.exchange)
                 return {"status": "liquidated_shorts", "reason": signal_reason}
