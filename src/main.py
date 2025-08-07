@@ -1,408 +1,129 @@
 import logging
-import asyncio
-import time
-import hmac
-import hashlib
-import os
-from contextlib import asynccontextmanager
-from typing import Optional, Dict, Any
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
-from ccxt.async_support import binance
-import uvicorn
+from typing import Optional
+from pydantic import Field, validator
+from pydantic_settings import BaseSettings
 
-# --- 导入配置 ---
-from src.config import CONFIG
-# --- 导入系统状态模块 ---
-from src.system_state import SystemState
-# --- 导入AI分析器 ---
-from src.ai.macro_analyzer import MacroAnalyzer
-# --- 导入黑天鹅雷达 ---
-from src.ai.black_swan_radar import start_black_swan_radar
-# --- 导入报警系统 ---
-from src.alert_system import AlertSystem
-# --- 导入交易引擎 ---
-from src.trading_engine import TradingEngine
+class Config(BaseSettings):
+    """基础配置类"""
+    binance_api_key: str = Field(..., env="BINANCE_API_KEY")
+    binance_api_secret: str = Field(..., env="BINANCE_API_SECRET")
+    discord_token: str = Field(..., env="DISCORD_TOKEN")
+    tv_webhook_secret: str = Field(..., env="TV_WEBHOOK_SECRET")
+    discord_channel_id: int = Field(..., env="DISCORD_CHANNEL_ID")
+    discord_prefix: str = Field(default="!", env="DISCORD_PREFIX")
+    run_mode: str = Field(default="simulate", env="RUN_MODE")
+    
+    # AI分析相关配置
+    deepseek_api_key: str = Field(..., env="DEEPSEEK_API_KEY")
+    
+    # 新增的UI相关配置项（都有默认值）
+    leverage: float = Field(default=5.0, env="LEVERAGE")
+    firepower: float = Field(default=0.8, env="FIRESPOWER")
+    allocation: str = Field(default="balanced", env="ALLOCATION")
+    
+    # 数据库配置
+    database_url: str = Field(default="sqlite+aiosqlite:///./data/trading_system_v7.db", env="DATABASE_URL")
+    
+    # Discord Webhook配置
+    discord_alert_webhook: Optional[str] = Field(default=None, env="DISCORD_ALERT_WEBHOOK")
+    discord_report_webhook: Optional[str] = Field(default=None, env="DISCORD_REPORT_WEBHOOK")
 
-# --- 日志配置 ---
+    # 报警系统配置
+    alert_order_timeout: int = Field(default=30, env="ALERT_ORDER_TIMEOUT")  # 订单超时时间（秒）
+    alert_slippage_threshold: float = Field(default=0.5, env="ALERT_SLIPPAGE_THRESHOLD")  # 滑点阈值（百分比）
+    alert_min_partial_fill: float = Field(default=0.2, env="ALERT_MIN_PARTIAL_FILL")  # 最小部分成交比例
+    alert_max_daily_loss: float = Field(default=5.0, env="ALERT_MAX_DAILY_LOSS")  # 最大单日亏损（百分比）
+    alert_api_retry_count: int = Field(default=3, env="ALERT_API_RETRY_COUNT")  # API重试次数
+    alert_cooldown_period: int = Field(default=300, env="ALERT_COOLDOWN_PERIOD")  # 报警冷却时间（秒）
+
+    # 交易引擎配置
+    trading_engine: bool = Field(default=True, env="TRADING_ENGINE")
+
+    class Config:
+        # 允许额外的字段，这样可以在不修改代码的情况下添加新的配置
+        extra = "allow"
+        # 从环境变量加载配置
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+
+    @validator('binance_api_key', 'binance_api_secret', 'discord_token', 
+               'tv_webhook_secret', 'deepseek_api_key')
+    def validate_required_fields(cls, v):
+        """验证必填字段"""
+        if not v:
+            raise ValueError("此字段为必填项")
+        return v
+
+    @validator('leverage')
+    def validate_leverage(cls, v):
+        """验证杠杆值范围"""
+        if not 1 <= v <= 10:
+            raise ValueError("杠杆值必须在1-10之间")
+        return v
+
+    @validator('firepower')
+    def validate_firepower(cls, v):
+        """验证火力值范围"""
+        if not 0 < v <= 1:
+            raise ValueError("火力值必须在0-1之间")
+        return v
+
+    @validator('allocation')
+    def validate_allocation(cls, v):
+        """验证分配模式"""
+        allowed_values = {"conservative", "balanced", "aggressive"}
+        if v not in allowed_values:
+            raise ValueError(f"分配模式必须是以下之一: {allowed_values}")
+        return v
+
+    @validator('alert_order_timeout')
+    def validate_alert_order_timeout(cls, v):
+        """验证订单超时时间"""
+        if not 10 <= v <= 300:
+            raise ValueError("订单超时时间必须在10-300秒之间")
+        return v
+
+    @validator('alert_slippage_threshold')
+    def validate_alert_slippage_threshold(cls, v):
+        """验证滑点阈值"""
+        if not 0.1 <= v <= 2.0:
+            raise ValueError("滑点阈值必须在0.1%-2.0%之间")
+        return v
+
+    @validator('alert_min_partial_fill')
+    def validate_alert_min_partial_fill(cls, v):
+        """验证最小部分成交比例"""
+        if not 0.1 <= v <= 0.9:
+            raise ValueError("最小部分成交比例必须在10%-90%之间")
+        return v
+
+    @validator('alert_max_daily_loss')
+    def validate_alert_max_daily_loss(cls, v):
+        """验证最大单日亏损"""
+        if not 1.0 <= v <= 20.0:
+            raise ValueError("最大单日亏损必须在1%-20%之间")
+        return v
+
+    @validator('alert_api_retry_count')
+    def validate_alert_api_retry_count(cls, v):
+        """验证API重试次数"""
+        if not 1 <= v <= 10:
+            raise ValueError("API重试次数必须在1-10次之间")
+        return v
+
+    @validator('alert_cooldown_period')
+    def validate_alert_cooldown_period(cls, v):
+        """验证报警冷却时间"""
+        if not 60 <= v <= 3600:
+            raise ValueError("报警冷却时间必须在60-3600秒之间")
+        return v
+
+# 创建全局配置实例
+CONFIG = Config()
+
+# 配置日志
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    format='%(asctime)s - (name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-# --- 全局变量 ---
-REQUEST_LOG: Dict[str, list] = {}
-discord_bot_task: Optional[asyncio.Task] = None
-discord_bot: Optional[Any] = None
-radar_task: Optional[asyncio.Task] = None
-startup_complete: bool = False
-alert_system: Optional[AlertSystem] = None
-trading_engine: Optional[TradingEngine] = None
-
-# --- Discord Bot 启动函数 ---
-async def start_discord_bot() -> Optional[Any]:
-    """启动Discord机器人的异步函数"""
-    global discord_bot
-    try:
-        from src.discord_bot import get_bot, initialize_bot
-        
-        max_retries = 20
-        retry_delay = 2
-        
-        for i in range(max_retries):
-            try:
-                if hasattr(app.state, 'exchange'):
-                    logger.info(f"✅ 交易所连接已就绪 (尝试 {i+1}/{max_retries})")
-                    await app.state.exchange.load_markets()
-                    logger.info("✅ 交易所连接已建立")
-                    break
-                else:
-                    logger.warning(f"⚠️ 交易所连接失败 (尝试 {i+1}/{max_retries})")
-                    if i == max_retries - 1:
-                        logger.warning(f"⚠️ 达到最大重试次数，放弃连接")
-                        raise
-            except Exception as e:
-                logger.error(f"❌ 交易所连接失败: {e}")
-                raise
-        
-        # 初始化数据库连接池
-        from src.database import init_db
-        db_task = asyncio.create_task(init_db())
-        await db_task
-        logger.info("✅ 数据库连接已建立")
-        
-        # 初始化报警系统
-        if CONFIG.discord_alert_webhook:
-            app.state.alert_system = AlertSystem(
-                webhook_url=CONFIG.discord_alert_webhook,
-                cooldown_period=CONFIG.alert_cooldown_period
-            )
-            await app.state.alert_system.start()
-            logger.info("✅ 报警系统已启动")
-        
-        # 初始化交易引擎
-        if CONFIG.trading_engine:
-            app.state.trading_engine = TradingEngine(
-                exchange=app.state.exchange,
-                alert_system=app.state.alert_system
-            )
-            await app.state.trading_engine.initialize()
-            logger.info("✅ 交易引擎已启动")
-        
-        # 启动黑天鹅雷达
-        radar_task = await safe_start_task(
-            start_black_swan_radar(),
-            "黑天鹅雷达"
-        )
-        logger.info("✅ 黑天鹅雷达已启动")
-        
-        # 设置系统状态为活跃
-        await SystemState.set_state("ACTIVE")
-        startup_complete = True
-        logger.info("🚀 系统启动完成")
-        
-        # 添加详细的调试日志
-        logger.info("🔄 正在初始化黑天鹅雷达...")
-        logger.info("📊 正在检查系统组件...")
-        logger.info("📊 正在验证系统状态...")
-        
-        # 验证关键组件
-        if not all([
-            hasattr(app.state, 'exchange'),
-            hasattr(app.state, 'trading_engine'),
-            hasattr(app.state, 'alert_system')
-        ]):
-            logger.error("❌ 系统组件初始化失败")
-            raise RuntimeError("系统组件初始化失败")
-        
-        # 返回成功
-        return {"status": "ok", "timestamp": time.time()}
-    except Exception as e:
-        logger.error(f"❌ Discord机器人启动失败: {e}", exc_info=True)
-        raise
-
-# --- 安全启动任务包装函数 ---
-async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
-    """安全启动任务的包装函数"""
-    try:
-        task = asyncio.create_task(task_func())
-        logger.info(f"✅ {name} 启动任务已创建")
-        return task
-    except ImportError as e:
-        logger.error(f"❌ {name} 启动任务失败: {e}")
-        return None
-
-# --- 生命周期管理 ---
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    global discord_bot_task, discord_bot, radar_task, startup_complete, alert_system, trading_engine
-    exchange = None
-    try:
-        logger.info("🔄 系统启动中...")
-        
-        # 1. 初始化数据库连接
-        from src.database import init_db
-        db_task = asyncio.create_task(init_db())
-        await db_task
-        logger.info("✅ 数据库连接已建立")
-        
-        # 2. 初始化交易所连接（重试机制）
-        exchange = binance({
-            'apiKey': CONFIG.binance_api_key,
-            'secret': CONFIG.binance_api_secret,
-            'enableRateLimit': True,
-            'options': {
-                'defaultType': 'future',
-                'adjustForTimeDifference': True
-            }
-        })
-        
-        max_retries = int(os.getenv("EXCHANGE_MAX_RETRIES", "3"))
-        
-        for i in range(max_retries):
-            try:
-                await asyncio.sleep(int(os.getenv("EXCHANGE_RETRY_DELAY", "5")) * i)
-                await exchange.load_markets()
-                logger.info(f"✅ 交易所连接已建立 (尝试 {i+1}/{max_retries})")
-                break
-            except Exception as e:
-                logger.error(f"❌ 交易所连接失败 (尝试 {i+1}/{max_retries}): {e}")
-                if i == max_retries - 1:
-                    logger.warning(f"⚠️ 达到最大重试次数，放弃连接")
-                    raise
-        
-        # 3. 初始化报警系统
-        if CONFIG.discord_alert_webhook:
-            app.state.alert_system = AlertSystem(
-                webhook_url=CONFIG.discord_alert_webhook,
-                cooldown_period=CONFIG.alert_cooldown_period
-            )
-            await app.state.alert_system.start()
-            alert_system = app.state.alert_system
-            logger.info("✅ 报警系统已启动")
-        else:
-            logger.warning("⚠️ 未配置Discord webhook，报警系统将不会启动")
-            app.state.alert_system = None
-        
-        # 4. 初始化 AI 分析器
-        app.state.macro_analyzer = MacroAnalyzer(api_key=CONFIG.deepseek_api_key)
-        logger.info("✅ 宏观分析器已初始化")
-        
-        # 5. 初始化交易引擎
-        if CONFIG.trading_engine:
-            app.state.trading_engine = TradingEngine(
-                exchange=exchange,
-                alert_system=app.state.alert_system
-            )
-            await app.state.trading_engine.initialize()
-            trading_engine = app.state.trading_engine
-            logger.info("✅ 交易引擎已启动")
-        
-        # 6. 启动黑天鹅雷达
-        radar_task = await safe_start_task(
-            start_black_swan_radar(),
-            "黑天鹅雷达"
-        )
-        logger.info("✅ 黑天鹅雷达已启动")
-        
-        # 7. 设置系统状态
-        await SystemState.set_state("ACTIVE")
-        startup_complete = True
-        logger.info("🚀 系统启动完成")
-        
-        yield
-        
-    except Exception as e:
-        logger.error(f"❌ 系统启动失败: {e}", exc_info=True)
-        await SystemState.set_state("ERROR")
-        raise
-    finally:
-        logger.info("🛑 系统关闭中...")
-        try:
-            await SystemState.set_state("SHUTDOWN")
-        except Exception as state_error:
-            logger.error(f"设置关闭状态失败: {state_error}", exc_info=True)
-        
-        # 关闭所有组件
-        if radar_task and not radar_task.done():
-            radar_task.cancel()
-            try:
-                await radar_task
-            except asyncio.CancelledError:
-                pass
-        
-        if alert_system:
-            try:
-                await alert_system.stop()
-            except Exception as e:
-                logger.error(f"关闭报警系统失败: {e}")
-        
-        if trading_engine:
-            try:
-                await trading_engine.stop()
-            except Exception as e:
-                logger.error(f"关闭交易引擎失败: {e}")
-        
-        if hasattr(app.state, 'exchange'):
-            try:
-                await app.state.exchange.close()
-            except Exception as e:
-                logger.error(f"关闭交易所连接失败: {e}")
-
-# --- FastAPI 应用 ---
-app = FastAPI(
-    title="量化交易系统",
-    version="7.2",
-    lifespan=lifespan,
-    debug=False
-)
-
-# --- 路由定义 ---
-@app.get("/")
-async def root() -> Dict[str, Any]:
-    return {
-        "status": "running",
-        "version": app.version,
-        "mode": CONFIG.run_mode
-    }
-
-@app.get("/health")
-async def health_check() -> Dict[str, Any]:
-    """健康检查端点"""
-    checks = {
-        "status": "unknown",
-        "timestamp": time.time(),
-        "components": {
-            "config": hasattr(CONFIG, 'discord_token'),
-            "database": False,
-            "exchange": False,
-            "discord": False,
-            "radar": False,
-            "alert_system": False,
-            "trading_engine": False
-        }
-    }
-    
-    try:
-        # 检查数据库连接
-        from src.database import check_database_health
-        checks["components"]["database"] = await check_database_health()
-    except Exception as e:
-        logger.error(f"数据库健康检查失败: {e}")
-        checks["components"]["database"] = False
-    
-    # 检查交易所连接
-    if hasattr(app.state, 'exchange'):
-        try:
-            await app.state.exchange.fetch_time()
-            checks["components"]["exchange"] = True
-        except Exception as e:
-            logger.error(f"交易所连接检查失败: {e}")
-            checks["components"]["exchange"] = False
-    
-    # 检查 Discord Bot
-    if discord_bot and discord_bot.is_ready():
-        checks["components"]["discord"] = True
-    else:
-        checks["components"]["discord"] = False
-    
-    # 检查黑天鹅雷达
-    if radar_task and not radar_task.done():
-        checks["components"]["radar"] = True
-    else:
-        checks["components"]["radar"] = False
-    
-    # 检查报警系统
-    if alert_system and alert_system.is_running():
-        checks["components"]["alert_system"] = True
-    else:
-        checks["components"]["alert_system"] = False
-    
-    # 检查交易引擎
-    if trading_engine:
-        checks["components"]["trading_engine"] = True
-    else:
-        checks["components"]["trading_engine"] = False
-    
-    # 返回检查结果
-    return {
-        "status": "ok" if all(checks["components"].values()) else "degraded",
-        "timestamp": time.time()
-    }
-
-@app.get("/startup-check")
-async def startup_check() -> Dict[str, Any]:
-    """启动检查端点"""
-    checks = {
-        "status": "unknown",
-        "timestamp": time.time(),
-        "components": {
-            "config_loaded": hasattr(CONFIG, 'discord_token'),
-            "database": False,
-            "exchange": False,
-            "discord": False,
-            "radar": False,
-            "alert_system": False,
-            "trading_engine": False
-        }
-    }
-    
-    try:
-        # 检查数据库连接
-        from src.database import check_database_health
-        checks["components"]["database"] = await check_database_health()
-    except Exception as e:
-        logger.error(f"数据库健康检查失败: {e}")
-        checks["components"]["database"] = False
-    
-    # 检查交易所连接
-    if hasattr(app.state, 'exchange'):
-        try:
-            await app.state.exchange.fetch_time()
-            checks["components"]["exchange"] = True
-        except Exception as e:
-            logger.error(f"交易所连接检查失败: {e}")
-            checks["components"]["exchange"] = False
-    
-    # 检查 Discord Bot
-    if discord_bot and discord_bot.is_ready():
-        checks["components"]["discord"] = True
-    else:
-        checks["components"]["discord"] = False
-    
-    # 检查黑天鹅雷达
-    if radar_task and not radar_task.done():
-        checks["components"]["radar"] = True
-    else:
-        checks["components"]["radar"] = False
-    
-    # 检查报警系统
-    if alert_system and alert_system.is_running():
-        checks["components"]["alert_system"] = True
-    else:
-        checks["components"]["alert_system"] = False
-    
-    # 检查交易引擎
-    if trading_engine:
-        checks["components"]["trading_engine"] = True
-    else:
-        checks["components"]["trading_engine"] = False
-    
-    # 返回检查结果
-    return {
-        "status": "ok" if all(checks["components"].values()) else "degraded",
-        "timestamp": time.time()
-    }
-
-# --- 主函数 ---
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8000"))
-    logger.info(f"启动服务器，端口: {port}")
-    uvicorn.run(
-        "src.main:app",
-        host="0.0.0.0",
-        port=port,
-        log_level="info",
-        workers=1
-    )
