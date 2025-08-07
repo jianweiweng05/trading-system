@@ -74,34 +74,11 @@ class TradingCommands(commands.Cog, name="交易系统"):
             'exchange': None,
             'db_pool': None
         }
-    
-    async def check_exchange_status(self) -> bool:
-        """检查交易所连接状态"""
-        try:
-            # 检查是否有交易所数据
-            if not hasattr(self.bot, 'bot_data') or 'exchange' not in self.bot.bot_data:
-                logger.debug("❌ 交易所数据不存在")
-                return False
-            
-            exchange = self.bot.bot_data['exchange']
-            
-            # 检查交易所对象是否有效
-            if not exchange:
-                logger.debug("❌ 交易所对象无效")
-                return False
-            
-            # 尝试获取服务器时间来验证连接
-            try:
-                await exchange.fetch_time()
-                logger.debug("✅ 交易所连接验证成功")
-                return True
-            except Exception as e:
-                logger.error(f"❌ 验证交易所连接失败: {e}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ 检查交易所状态失败: {e}")
-            return False
+        self.alert_status = {
+            'active': False,
+            'last_alert': None,
+            'alert_count': 0
+        }
     
     # 旧版文本命令（!status）
     @commands.command(name="status", help="查看系统状态")
@@ -116,12 +93,11 @@ class TradingCommands(commands.Cog, name="交易系统"):
             embed.add_field(name="Bot状态", value="🟢 在线")
             embed.add_field(name="延迟", value=f"{round(self.bot.latency * 1000)} ms")
             
-            # 检查交易所连接状态
-            exchange_status = await self.check_exchange_status()
-            if exchange_status:
-                embed.add_field(name="交易所连接", value="🟢 已连接", inline=False)
-            else:
-                embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
+            # 添加报警状态显示
+            alert_status = "🟢 正常" if not self.alert_status['active'] else "🔴 报警中"
+            embed.add_field(name="报警状态", value=alert_status, inline=False)
+            if self.alert_status['last_alert']:
+                embed.add_field(name="最近报警", value=self.alert_status['last_alert'], inline=False)
             
             await ctx.send(embed=embed)
             logger.info(f"✅ 用户 {ctx.author} 查看了系统状态")
@@ -146,12 +122,11 @@ class TradingCommands(commands.Cog, name="交易系统"):
             embed.add_field(name="Bot状态", value="🟢 在线")
             embed.add_field(name="延迟", value=f"{round(self.bot.latency * 1000)} ms")
             
-            # 检查交易所连接状态
-            exchange_status = await self.check_exchange_status()
-            if exchange_status:
-                embed.add_field(name="交易所连接", value="🟢 已连接", inline=False)
-            else:
-                embed.add_field(name="交易所连接", value="🔴 未连接，有问题。", inline=False)
+            # 添加报警状态显示
+            alert_status = "🟢 正常" if not self.alert_status['active'] else "🔴 报警中"
+            embed.add_field(name="报警状态", value=alert_status, inline=False)
+            if self.alert_status['last_alert']:
+                embed.add_field(name="最近报警", value=self.alert_status['last_alert'], inline=False)
             
             # 使用 followup 发送实际响应
             await interaction.followup.send(embed=embed, ephemeral=True)
@@ -169,6 +144,27 @@ class TradingCommands(commands.Cog, name="交易系统"):
             except Exception as followup_error:
                 logger.error(f"发送错误消息失败: {followup_error}")
 
+    # 新增：报警触发方法
+    async def trigger_alert(self, alert_type: str, message: str):
+        """触发报警"""
+        self.alert_status['active'] = True
+        self.alert_status['last_alert'] = f"{alert_type}: {message}"
+        self.alert_status['alert_count'] += 1
+        
+        # 发送报警消息到指定频道
+        channel = self.bot.get_channel(int(CONFIG.discord_channel_id))
+        if channel:
+            embed = discord.Embed(
+                title="⚠️ 系统报警",
+                description=message,
+                color=discord.Color.red()
+            )
+            embed.add_field(name="报警类型", value=alert_type)
+            embed.add_field(name="报警次数", value=str(self.alert_status['alert_count']))
+            await channel.send(embed=embed)
+        
+        logger.warning(f"触发报警: {alert_type} - {message}")
+
 # ================= 生命周期管理 =================
 async def initialize_bot(bot: commands.Bot):
     """初始化 Discord Bot"""
@@ -176,29 +172,6 @@ async def initialize_bot(bot: commands.Bot):
         # 初始化数据库连接池
         from src.database import db_pool
         bot.bot_data['db_pool'] = db_pool
-        
-        # 等待交易所连接建立
-        max_retries = 20
-        retry_delay = 2
-        
-        for i in range(max_retries):
-            if hasattr(bot, 'bot_data') and bot.bot_data.get('exchange'):
-                logger.info("✅ 交易所连接已就绪，启动Discord机器人")
-                break
-            if i < max_retries - 1:
-                logger.info(f"等待交易所连接建立... ({i + 1}/{max_retries})")
-                await asyncio.sleep(retry_delay)
-        else:
-            logger.warning("⚠️ 交易所连接未就绪，Discord机器人仍将启动")
-        
-        # 验证交易所连接
-        if bot.bot_data.get('exchange'):
-            try:
-                await bot.bot_data['exchange'].fetch_time()
-                logger.info("✅ 交易所连接验证成功")
-            except Exception as e:
-                logger.error(f"❌ 交易所连接验证失败: {e}")
-                bot.bot_data['exchange'] = None
         
         # 移除默认的help命令
         bot.remove_command('help')
