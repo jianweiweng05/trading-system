@@ -138,7 +138,7 @@ async def lifespan(app: FastAPI):
         
         for i in range(max_retries):
             try:
-                await asyncio.sleep(int(os.getenv("EXCHANGE_RETRY_DELAY", "5")) * i))
+                await asyncio.sleep(int(os.getenv("EXCHANGE_RETRY_DELAY", "5")) * i)
                 await exchange.load_markets()
                 logger.info(f"✅ 交易所连接已建立 (尝试 {i+1}/{max_retries})")
                 break
