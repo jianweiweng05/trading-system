@@ -373,7 +373,7 @@ async def health_check() -> Dict[str, Any]:
         checks["components"]["radar"] = False
     
     # 检查报警系统
-    if alert_system and alert_system.is_running():
+    if alert_system and alert_system.is_running:
         checks["components"]["alert_system"] = True
     else:
         checks["components"]["alert_system"] = False
