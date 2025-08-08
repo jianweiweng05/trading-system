@@ -90,42 +90,39 @@ class TradingModeView(View):
 
 class ConfirmView(View):
     """确认对话框"""
-    def __init__(self):
+    def __init__(self, parent_view: TradingModeView): # 【修改】接收 parent_view
         super().__init__(timeout=30)
+        self.parent_view = parent_view # 【修改】保存 parent_view
         
-        # 确认按钮
-        self.confirm = Button(
-            label="确认",
-            style=discord.ButtonStyle.green,
-            custom_id="confirm_live"
-        )
+        self.confirm = Button(label="确认", style=discord.ButtonStyle.green, custom_id="confirm_live")
         self.confirm.callback = self.confirm_switch
         self.add_item(self.confirm)
         
-        # 取消按钮
-        self.cancel = Button(
-            label="取消",
-            style=discord.ButtonStyle.red,
-            custom_id="cancel_live"
-        )
+        self.cancel = Button(label="取消", style=discord.ButtonStyle.red, custom_id="cancel_live")
         self.cancel.callback = self.cancel_switch
         self.add_item(self.cancel)
     
     async def confirm_switch(self, interaction: discord.Interaction):
         """确认切换到实盘模式"""
         try:
-            # 更新配置
+            # 【修改】更新 CONFIG
             CONFIG.run_mode = "live"
             
-            # 发送响应
-            await interaction.response.edit_message(content="✅ 已切换到实盘交易模式", view=None)
+            # 【修改】通过保存的 parent_view，调用它的方法来更新按钮状态
+            self.parent_view.update_to_live_mode()
             
-            # 记录日志
+            # 【修改】同时更新父视图的消息和当前确认框的消息
+            await self.parent_view.message.edit(view=self.parent_view)
+            await interaction.response.edit_message(content="✅ 已成功切换到实盘交易模式", view=None)
+            
             logger.info(f"用户 {interaction.user} 切换到实盘交易模式")
-            
         except Exception as e:
             logger.error(f"切换到实盘交易模式失败: {e}", exc_info=True)
-            await interaction.response.send_message("切换失败，请稍后重试", ephemeral=True)
+            await interaction.response.edit_message(content="❌ 切换失败，请稍后重试", view=None)
+    
+    async def cancel_switch(self, interaction: discord.Interaction):
+        """取消切换"""
+        await interaction.response.edit_message(content="❌ 已取消切换", view=None)
     
     async def cancel_switch(self, interaction: discord.Interaction):
         """取消切换"""
