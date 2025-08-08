@@ -31,7 +31,7 @@ class TradingEngine:
         
         # 新增：共振池数据
         self.resonance_pool: Dict[str, Dict] = {}
-        self.signal_timeout = CONFIG.macro_cache_timeout  # 【修改】使用配置项
+        self.signal_timeout = CONFIG.macro_cache_timeout
         
         # 新增：宏观状态缓存
         self._macro_status: Optional[Dict[str, Any]] = None
@@ -93,8 +93,18 @@ class TradingEngine:
             # 获取账户余额
             balance = await self.exchange.fetch_balance()
             
-            # 【修改】优化字符串操作，只调用一次 split
-            base_currency, quote_currency = symbol.split('/')
+            # 【修改】使用更健壮的货币对解析
+            base_currency = None
+            quote_currency = None
+            
+            if '/' in symbol:
+                # 处理 BTC/USDT 格式
+                base_currency, quote_currency = symbol.split('/')
+            else:
+                # 处理 BTCUSDT 格式
+                # 假设前3个字符是基础货币，后面是计价货币
+                base_currency = symbol[:3]
+                quote_currency = symbol[3:]
             
             # 检查买入/卖出方向
             if price is not None:  # 限价单
@@ -206,7 +216,7 @@ class TradingEngine:
             logger.error(f"取消订单失败: {e}")
             return False
     
-    async def get_position(self, symbol: str) -> Dict[str, Any]:  # 【修改】完善类型注解
+    async def get_position(self, symbol: str) -> Dict[str, Any]:
         """获取指定交易对或所有持仓信息"""
         try:
             # 【修改】不再使用"*"，而是调用不带参数的 fetch_positions 获取所有持仓
@@ -223,7 +233,7 @@ class TradingEngine:
 
         except Exception as e:
             logger.error(f"获取持仓失败: {e}")
-            return {}  # 【修改】返回空字典而不是 None
+            return {}
     
     def update_daily_pnl(self, pnl: float):
         """更新每日盈亏"""
@@ -285,6 +295,7 @@ class TradingEngine:
             del self.resonance_pool[signal_id]
             logger.info(f"从共振池移除信号: {signal_id}")
     
+    # 【修改】改为普通函数
     def get_resonance_pool(self) -> Dict[str, Any]:
         """获取共振池状态"""
         current_time = time.time()
@@ -333,14 +344,14 @@ class TradingEngine:
         if expired_count > 0:
             logger.info(f"清理了 {expired_count} 个过期信号")
     
-    # 新增：获取宏观状态方法
-    async def get_macro_status(self) -> Dict[str, Any]:
+    # 【修改】改为普通函数
+    def get_macro_status(self) -> Dict[str, Any]:
         """获取宏观状态信息"""
         current_time = time.time()
         
         # 如果缓存不存在或过期，返回默认值
         if (not self._macro_status or 
-            current_time - self._last_macro_update > CONFIG.macro_cache_timeout):  # 【修改】使用配置项
+            current_time - self._last_macro_update > CONFIG.macro_cache_timeout):
             
             logger.info("宏观状态缓存过期，返回默认值")
             self._macro_status = {
