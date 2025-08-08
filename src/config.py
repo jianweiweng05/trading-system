@@ -44,6 +44,11 @@ class Config(BaseSettings):
     default_eth_status: str = Field(default="neutral", env="DEFAULT_ETH_STATUS")
     status_update_interval: int = Field(default=3600, env="STATUS_UPDATE_INTERVAL")  # 状态更新间隔（秒）
 
+    # 【新增】数据库连接相关配置
+    macro_cache_timeout: int = Field(default=300, env="MACRO_CACHE_TIMEOUT")  # 宏观状态缓存时间（秒）
+    db_retry_attempts: int = Field(default=3, env="DB_RETRY_ATTEMPTS")  # 数据库重试次数
+    db_retry_delay: float = Field(default=1.0, env="DB_RETRY_DELAY")  # 数据库重试间隔（秒）
+
     class Config:
         # 允许额外的字段，这样可以在不修改代码的情况下添加新的配置
         extra = "allow"
@@ -129,6 +134,28 @@ class Config(BaseSettings):
         allowed_values = {"bullish", "bearish", "neutral"}
         if v not in allowed_values:
             raise ValueError(f"默认状态必须是以下之一: {allowed_values}")
+        return v
+
+    # 【新增】验证器
+    @validator('macro_cache_timeout')
+    def validate_macro_cache_timeout(cls, v):
+        """验证宏观状态缓存时间"""
+        if not 60 <= v <= 3600:
+            raise ValueError("宏观状态缓存时间必须在60-3600秒之间")
+        return v
+
+    @validator('db_retry_attempts')
+    def validate_db_retry_attempts(cls, v):
+        """验证数据库重试次数"""
+        if not 1 <= v <= 10:
+            raise ValueError("数据库重试次数必须在1-10次之间")
+        return v
+
+    @validator('db_retry_delay')
+    def validate_db_retry_delay(cls, v):
+        """验证数据库重试间隔"""
+        if not 0.1 <= v <= 10.0:
+            raise ValueError("数据库重试间隔必须在0.1-10秒之间")
         return v
 
 # 创建全局配置实例
