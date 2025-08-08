@@ -1,75 +1,115 @@
-import logging
-import time
-import asyncio
-import os  # 【修改】添加缺失的导入
-import uvicorn  # 【修改】添加缺失的导入
-from typing import Dict, Optional, Any  # 【修改】添加 Any
-from sqlalchemy import text
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, HTTPException  # 【修改】添加 Request 和 HTTPException
-from src.config import CONFIG  # 【修改】添加缺失的导入
 
+import logging
+import asyncio
+import time
+import hmac
+import hashlib
+import os
+from contextlib import asynccontextmanager
+from typing import Optional, Dict, Any
+
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from ccxt.async_support import binance
+import uvicorn
+
+# --- 导入配置 ---
+from src.config import CONFIG
+# --- 导入系统状态模块 ---
+from src.system_state import SystemState
+# --- 导入AI分析器 ---
+from src.ai.macro_analyzer import MacroAnalyzer
+# --- 导入黑天鹅雷达 ---
+from src.ai.black_swan_radar import start_black_swan_radar
+# --- 导入报警系统 ---
+from src.alert_system import AlertSystem
+# --- 导入交易引擎 ---
+from src.trading_engine import TradingEngine
+# --- 导入 Discord Bot 启动器 ---
+from src.discord_bot import start_discord_bot as run_discord_bot, stop_bot_services
+
+# --- 日志配置 ---
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-async def init_tv_status_table() -> None:  # 【修改】添加返回类型注解
+# --- 全局变量 ---
+REQUEST_LOG: Dict[str, list] = {}
+
+# --- TV状态数据库操作 ---
+async def init_tv_status_table():
     """初始化TV状态表"""
+    conn = None
     try:
         from src.database import db_pool
-        async with db_pool.get_simple_session() as conn:
-            await conn.execute(text('''
-                CREATE TABLE IF NOT EXISTS tv_status (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    symbol VARCHAR(10) NOT NULL UNIQUE,
-                    status VARCHAR(20) NOT NULL,
-                    timestamp REAL NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            '''))
-            await conn.commit()
+        conn = await db_pool.get_simple_session()
+        await conn.execute(text('''
+            CREATE TABLE IF NOT EXISTS tv_status (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol VARCHAR(10) NOT NULL UNIQUE,
+                status VARCHAR(20) NOT NULL,
+                timestamp REAL NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        '''))
+        await conn.commit()
     except Exception as e:
         logger.error(f"初始化TV状态表失败: {e}")
-        raise  # 【修改】修复缩进
+        raise
+    finally:
+        if conn:
+            await conn.close()
 
 async def load_tv_status() -> Dict[str, str]:
     """从数据库加载TV状态"""
     status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
+    conn = None
     try:
         from src.database import db_pool
-        async with db_pool.get_simple_session() as conn:  # 【修改】统一使用 async with
-            result = await conn.execute(text('SELECT symbol, status FROM tv_status'))
-            rows = await result.fetchall()
-            for row in rows:
-                status[row['symbol']] = row['status']
+        conn = await db_pool.get_simple_session()
+        cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
+        rows = await cursor.fetchall()
+        for row in rows:
+            status[row['symbol']] = row['status']
     except Exception as e:
         logger.error(f"加载TV状态失败: {e}")
+    finally:
+        if conn:
+            await conn.close()
     return status
 
-async def save_tv_status(symbol: str, status: str) -> None:  # 【修改】添加返回类型注解
+async def save_tv_status(symbol: str, status: str):
     """保存TV状态到数据库"""
+    conn = None
     try:
         from src.database import db_pool
-        async with db_pool.get_simple_session() as conn:  # 【修改】统一使用 async with
-            await conn.execute(text('''
-                INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
-                VALUES (?, ?, ?)
-            '''), (symbol, status, time.time()))
-            await conn.commit()
+        conn = await db_pool.get_simple_session()
+        await conn.execute(text('''
+            INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
+            VALUES (?, ?, ?)
+        '''), (symbol, status, time.time()))
+        await conn.commit()
     except Exception as e:
         logger.error(f"保存TV状态失败: {e}")
-        raise RuntimeError("保存TV状态失败") from e  # 【修改】保持异常链
+    finally:
+        if conn:
+            await conn.close()
 
-# --- 【修改】安全启动任务包装函数，扩大异常捕获范围 ---
+# --- 安全启动任务包装函数 ---
 async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
     """安全启动任务的包装函数"""
     try:
         task = asyncio.create_task(task_func())
         logger.info(f"✅ {name} 启动任务已创建")
         return task
-    except Exception as e: # 捕获所有可能的异常
+    except Exception as e:
         logger.error(f"❌ {name} 启动任务失败: {e}", exc_info=True)
         return None
 
-# --- 【修改】生命周期管理，增强资源清理的健壮性 ---
+# --- 生命周期管理 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -132,10 +172,9 @@ async def lifespan(app: FastAPI):
             start_black_swan_radar,
             "黑天鹅雷达"
         )
-      
-        # 8. 启动 Discord Bot (作为后台任务)
+        
+        # 8. 启动 Discord Bot
         if CONFIG.discord_token:
-            # 【修改】使用 lambda 将 app 对象传递给 run_discord_bot
             start_func = lambda: run_discord_bot(app)
             background_tasks['discord_bot'] = await safe_start_task(
                 start_func,
@@ -158,7 +197,6 @@ async def lifespan(app: FastAPI):
         logger.info("🛑 系统关闭中...")
         await SystemState.set_state("SHUTDOWN")
         
-        # 为每个关闭操作添加独立的 try-except 块
         for name, task in background_tasks.items():
             try:
                 if task and not task.done():
@@ -186,12 +224,6 @@ async def lifespan(app: FastAPI):
                 await app.state.exchange.close()
         except Exception as e:
             logger.error(f"❌ 关闭交易所连接时出错: {e}", exc_info=True)
-
-        try:
-            if hasattr(app.state, 'macro_analyzer'):  # 【修改】添加 macro_analyzer 清理
-                await app.state.macro_analyzer.close()  # 【修改】假设有 close 方法
-        except Exception as e:
-            logger.error(f"❌ 关闭宏观分析器时出错: {e}", exc_info=True)
         
         logger.info("✅ 所有服务已关闭")
 
@@ -203,7 +235,7 @@ app = FastAPI(
     debug=False
 )
 
-# --- 路由定义 (保持不变) ---
+# --- 路由定义 ---
 @app.get("/")
 async def root() -> Dict[str, Any]:
     return {
@@ -212,7 +244,6 @@ async def root() -> Dict[str, Any]:
         "mode": CONFIG.run_mode
     }
 
-# --- 【修改】健康检查端点，改进健康检查逻辑 ---
 @app.get("/health")
 async def health_check(request: Request) -> Dict[str, Any]:
     """健康检查端点"""
@@ -232,19 +263,15 @@ async def health_check(request: Request) -> Dict[str, Any]:
     
     if hasattr(app_state, 'exchange'):
         try:
-            # 实际的健康检查：尝试获取服务器时间
             await app_state.exchange.fetch_time()
             checks["exchange"] = True
         except Exception:
             checks["exchange"] = False
             
     if hasattr(app_state, 'alert_system') and app_state.alert_system:
-        # 实际的健康检查：检查其内部状态
         checks["alert_system"] = app_state.alert_system.is_running
     
     if hasattr(app_state, 'trading_engine') and app_state.trading_engine:
-        # 改进的健康检查：假设如果交易所健康，交易引擎也大概率是健康的
-        # 未来可以为 TradingEngine 添加自己的 is_healthy() 方法
         checks["trading_engine"] = checks["exchange"]
 
     return {
@@ -253,7 +280,6 @@ async def health_check(request: Request) -> Dict[str, Any]:
         "components": checks
     }
 
-# --- Webhook 和 TV 状态路由 (保持不变) ---
 @app.post("/webhook/tradingview")
 async def tradingview_webhook(request: Request):
     """TradingView Webhook接收端点"""
@@ -290,7 +316,7 @@ async def get_tv_status():
         logger.error(f"获取TV状态失败: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# --- 主函数 (保持不变) ---
+# --- 主函数 ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     logger.info(f"启动服务器，端口: {port}")
