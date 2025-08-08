@@ -1,13 +1,14 @@
-from sqlalchemy import text
+# --- 请用这段新代码，完整替换你现有的 discord_bot.py 文件 ---
+
 import logging
 import discord
 from discord import app_commands
 from discord.ext import commands
 import asyncio
 from typing import Optional, Dict, Any
-from fastapi import FastAPI # 【修改】导入 FastAPI 用于类型注解
+from fastapi import FastAPI
+from sqlalchemy import text # 【修改】添加缺失的导入
 from src.config import CONFIG
-from src.database import db_pool  # 【修改】移到顶部导入
 
 # ================= 日志配置 =================
 logging.basicConfig(
@@ -74,9 +75,8 @@ class TradingCommands(commands.Cog, name="交易系统"):
     
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-   
-# --- 请用这段新代码，替换你现有的 get_macro_status 整个函数 ---
-
+    
+    # --- 【修改】修复了数据库查询的 TypeError ---
     async def get_macro_status(self) -> Dict[str, Any]:
         """获取宏观状态信息"""
         current_time = asyncio.get_event_loop().time()
@@ -90,7 +90,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
             try:
                 from src.database import db_pool
                 conn = await db_pool.get_simple_session()
-                # 【修改】将 SQL 字符串用 text() 包裹起来
+                # 将 SQL 字符串用 text() 包裹起来
                 cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
                 rows = await cursor.fetchall()
                 
@@ -121,6 +121,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
         
         return getattr(app_state, '_macro_status', {}).copy()
 
+    # --- 【修改】修复了 SyntaxError 并提取了重复逻辑 ---
     async def _create_status_embed(self) -> discord.Embed:
         """创建一个包含当前系统状态的 Discord Embed 对象"""
         embed = discord.Embed(
@@ -128,9 +129,17 @@ class TradingCommands(commands.Cog, name="交易系统"):
             color=discord.Color.green()
         )
         embed.add_field(name="运行模式", value=CONFIG.run_mode)
-        embed.add_field(name="Bot
+        embed.add_field(name="Bot状态", value="🟢 在线")
+        embed.add_field(name="延迟", value=f"{round(self.bot.latency * 1000)} ms")
+        
+        macro_status = await self.get_macro_status()
+        macro_text = f"""宏观：{macro_status.get('trend', '未知')}
+BTC1d ({macro_status.get('btc1d', '未知')})
+ETH1d ({macro_status.get('eth1d', '未知')})"""
+        embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
+        
+        return embed
 
-    # --- 【修改】简化 text_status，调用辅助函数 ---
     @commands.command(name="status", help="查看系统状态")
     async def text_status(self, ctx: commands.Context):
         """查看系统状态 - 文本命令版本"""
@@ -141,7 +150,6 @@ class TradingCommands(commands.Cog, name="交易系统"):
             logger.error(f"status 命令执行失败: {e}")
             await ctx.send("❌ 获取系统状态失败", ephemeral=True)
 
-    # --- 【修改】简化 slash_status，调用辅助函数 ---
     @app_commands.command(name="status", description="查看系统状态")
     async def slash_status(self, interaction: discord.Interaction):
         """查看系统状态 - 斜杠命令版本"""
@@ -154,7 +162,6 @@ class TradingCommands(commands.Cog, name="交易系统"):
             await interaction.followup.send("❌ 获取系统状态失败", ephemeral=True)
 
 # ================= 生命周期管理 =================
-# --- 【修改】将 app: Any 改为 app: FastAPI ---
 async def initialize_bot(bot: commands.Bot, app: FastAPI):
     """初始化 Discord Bot"""
     try:
@@ -181,7 +188,6 @@ async def stop_bot_services():
         await bot.close()
         logger.info("🛑 Discord Bot 已关闭")
 
-# --- 【修改】将 app: Any 改为 app: FastAPI ---
 async def start_discord_bot(app: FastAPI):
     """启动Discord Bot的入口函数"""
     bot = get_bot()
