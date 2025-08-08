@@ -1,14 +1,17 @@
 import logging
 import time
-import asyncio  # 【修改】添加 asyncio 导入
-from typing import Dict, Optional  # 【修改】添加 Optional
+import asyncio
+import os  # 【修改】添加缺失的导入
+import uvicorn  # 【修改】添加缺失的导入
+from typing import Dict, Optional, Any  # 【修改】添加 Any
 from sqlalchemy import text
-from contextlib import asynccontextmanager  # 【修改】添加缺失的导入
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request, HTTPException  # 【修改】添加 Request 和 HTTPException
 from src.config import CONFIG  # 【修改】添加缺失的导入
 
 logger = logging.getLogger(__name__)
 
-async def init_tv_status_table():
+async def init_tv_status_table() -> None:  # 【修改】添加返回类型注解
     """初始化TV状态表"""
     try:
         from src.database import db_pool
@@ -41,7 +44,7 @@ async def load_tv_status() -> Dict[str, str]:
         logger.error(f"加载TV状态失败: {e}")
     return status
 
-async def save_tv_status(symbol: str, status: str):
+async def save_tv_status(symbol: str, status: str) -> None:  # 【修改】添加返回类型注解
     """保存TV状态到数据库"""
     try:
         from src.database import db_pool
@@ -183,6 +186,12 @@ async def lifespan(app: FastAPI):
                 await app.state.exchange.close()
         except Exception as e:
             logger.error(f"❌ 关闭交易所连接时出错: {e}", exc_info=True)
+
+        try:
+            if hasattr(app.state, 'macro_analyzer'):  # 【修改】添加 macro_analyzer 清理
+                await app.state.macro_analyzer.close()  # 【修改】假设有 close 方法
+        except Exception as e:
+            logger.error(f"❌ 关闭宏观分析器时出错: {e}", exc_info=True)
         
         logger.info("✅ 所有服务已关闭")
 
