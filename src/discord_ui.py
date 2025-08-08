@@ -261,10 +261,14 @@ class FirepowerModal(Modal, title="设置火力系数"):
             logger.error(f"更新火力系数失败: {e}", exc_info=True)
             await interaction.response.send_message("更新失败，请稍后重试", ephemeral=True)
 
+# --- 请用这段新代码，替换你现有的 QuickActionsView 整个类 ---
+
 class QuickActionsView(View):
     """快速操作视图"""
-    def __init__(self):
+    # 【修改】__init__ 方法被恢复并修正，现在接收 bot
+    def __init__(self, bot: commands.Bot):
         super().__init__(timeout=None)
+        self.bot = bot # 保存 bot 实例，以便后续使用
         
         # 刷新按钮
         self.refresh_button = Button(
@@ -301,82 +305,55 @@ class QuickActionsView(View):
         )
         self.save_button.callback = self.save_config
         self.add_item(self.save_button)
-    
+
     async def refresh_status(self, interaction: discord.Interaction):
         """刷新状态"""
         try:
-            # 先发送延迟响应
             await interaction.response.defer(ephemeral=True)
+            embed = discord.Embed(title="📊 系统状态报告", color=discord.Color.green())
             
-            # 创建状态嵌入消息
-            embed = discord.Embed(
-                title="📊 系统状态报告",
-                color=discord.Color.green()
-            )
-            
-            # 添加状态行
             status_text = f"🟢 状态: 运行中 | ⚙️ 模式: {'模拟' if CONFIG.run_mode == 'simulate' else '实盘'}"
             embed.add_field(name="系统状态", value=status_text, inline=False)
             
-            # 添加宏观状态
-            macro_status = "未知"
-            btc_status = "未知"
-            eth_status = "未知"
+            # 【修改】从 app.state 安全地获取 trading_engine
+            trading_engine = getattr(self.bot.app.state, 'trading_engine', None)
             
-            # 尝试获取宏观分析器数据
-            if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
+            macro_status, btc_status, eth_status = "未知", "未知", "未知"
+            if trading_engine and hasattr(trading_engine, 'get_macro_status'):
                 try:
-                    trading_engine = self.bot.bot_data['trading_engine']
-                    if hasattr(trading_engine, 'get_macro_status'):
-                        macro_data = await trading_engine.get_macro_status()
-                        macro_status = macro_data.get('trend', '未知')
-                        btc_status = macro_data.get('btc1d', '未知')
-                        eth_status = macro_data.get('eth1d', '未知')
+                    macro_data = await trading_engine.get_macro_status()
+                    macro_status = macro_data.get('trend', '未知')
+                    btc_status = macro_data.get('btc1d', '未知')
+                    eth_status = macro_data.get('eth1d', '未知')
                 except Exception as e:
                     logger.error(f"获取宏观状态失败: {e}")
             
-            macro_text = f"""宏观：{macro_status}
-BTC1d ({btc_status})
-ETH1d ({eth_status})"""
+            macro_text = f"宏观：{macro_status}\nBTC1d ({btc_status})\nETH1d ({eth_status})"
             embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
             
-            # 添加分隔线
             embed.add_field(name="─" * 20, value="─" * 20, inline=False)
             
-            # 添加共振池信息
-            signal_count = 0
-            signal_status = "无待处理信号"
-            
-            # 尝试获取共振池数据
-            if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
+            signal_count, signal_status = 0, "无待处理信号"
+            if trading_engine and hasattr(trading_engine, 'get_resonance_pool'):
                 try:
-                    trading_engine = self.bot.bot_data['trading_engine']
-                    if hasattr(trading_engine, 'get_resonance_pool'):
-                        pool_data = await trading_engine.get_resonance_pool()
-                        signal_count = len(pool_data.get('signals', []))
-                        if signal_count > 0:
-                            signal_status = f"有 {signal_count} 个待处理信号"
+                    pool_data = await trading_engine.get_resonance_pool()
+                    signal_count = len(pool_data.get('signals', []))
+                    if signal_count > 0:
+                        signal_status = f"有 {signal_count} 个待处理信号"
                 except Exception as e:
                     logger.error(f"获取共振池状态失败: {e}")
             
             embed.add_field(name="⏳ 共振池", value=f"({signal_count}个信号)", inline=False)
             embed.add_field(name="信号状态", value=signal_status, inline=False)
             
-            # 添加分隔线
             embed.add_field(name="─" * 20, value="─" * 20, inline=False)
             
-            # 添加持仓信息
-            pnl_text = "🟢 $0.00"
-            position_text = "无持仓"
-            
-            # 尝试获取持仓数据
-            if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
+            pnl_text, position_text = "🟢 $0.00", "无持仓"
+            if trading_engine:
                 try:
-                    trading_engine = self.bot.bot_data['trading_engine']
                     positions = await trading_engine.get_position("*")
                     if positions:
-                        total_pnl = 0.0
-                        position_lines = []
+                        total_pnl, position_lines = 0.0, []
                         for symbol, position in positions.items():
                             size = float(position.get('size', 0))
                             if size != 0:
@@ -395,31 +372,75 @@ ETH1d ({eth_status})"""
             embed.add_field(name="📈 持仓/浮盈", value=pnl_text, inline=False)
             embed.add_field(name="持仓状态", value=position_text, inline=False)
             
-            # 添加报警状态
-            if hasattr(self.bot, 'bot_data') and 'alert_system' in self.bot.bot_data:
-                alert_status = self.bot.bot_data['alert_system'].get_status()
-                alert_emoji = "🔴" if alert_status['active'] else "🟢"
+            # 【修改】从 app.state 安全地获取 alert_system
+            alert_system = getattr(self.bot.app.state, 'alert_system', None)
+            if alert_system:
+                alert_status = alert_system.get_status()
+                alert_emoji = "🔴" if alert_status.get('active') else "🟢"
                 embed.add_field(name=f"报警状态 {alert_emoji}", 
                               value=f"最近报警: {alert_status.get('last_alert', '无')}", 
                               inline=False)
             
-            # 使用 followup 发送实际响应
             await interaction.followup.send(embed=embed, ephemeral=True)
-            
-            # 记录日志
             logger.info(f"用户 {interaction.user} 刷新了系统状态")
-            
-        except discord.errors.InteractionResponded:
-            logger.error("交互已响应，无法再次发送响应")
         except Exception as e:
             logger.error(f"刷新状态失败: {e}", exc_info=True)
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("刷新失败，请稍后重试", ephemeral=True)
+            await interaction.followup.send("刷新失败，请稍后重试", ephemeral=True)
+    
+    async def view_positions(self, interaction: discord.Interaction):
+        """查看持仓"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+            embed = discord.Embed(title="📊 当前持仓", color=discord.Color.blue())
+            
+            # 【修改】从 app.state 安全地获取 trading_engine
+            trading_engine = getattr(self.bot.app.state, 'trading_engine', None)
+            
+            if trading_engine:
+                positions = await trading_engine.get_position("*")
+                if not positions or all(float(p.get('size', 0)) == 0 for p in positions.values()):
+                    embed.description = "暂无持仓"
                 else:
-                    await interaction.followup.send("刷新失败，请稍后重试", ephemeral=True)
-            except Exception as followup_error:
-                logger.error(f"发送错误消息失败: {followup_error}")
+                    for symbol, position in positions.items():
+                        size = float(position.get('size', 0))
+                        if size != 0:
+                            side = "多头" if size > 0 else "空头"
+                            pnl = float(position.get('pnl', 0))
+                            embed.add_field(name=f"{symbol} ({side})", value=f"数量: {abs(size)}\n浮盈: ${pnl:.2f}", inline=True)
+            else:
+                embed.description = "交易引擎未初始化"
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            logger.info(f"用户 {interaction.user} 查看了持仓信息")
+        except Exception as e:
+            logger.error(f"查看持仓失败: {e}", exc_info=True)
+            await interaction.followup.send("查看持仓失败，请稍后重试", ephemeral=True)
+    
+    async def view_alerts(self, interaction: discord.Interaction):
+        """查看报警历史"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+            embed = discord.Embed(title="📋 报警历史", color=discord.Color.blue())
+            
+            # 【修改】从 app.state 安全地获取 alert_system
+            alert_system = getattr(self.bot.app.state, 'alert_system', None)
+            
+            if alert_system:
+                alerts = alert_system.get_alerts()
+                if alerts:
+                    for alert in alerts[-5:]:
+                        timestamp = int(alert['timestamp'])
+                        embed.add_field(name=f"{alert['type']} ({alert['level']})", value=f"{alert['message']}\n<t:{timestamp}:R>", inline=False)
+                else:
+                    embed.description = "暂无报警记录"
+            else:
+                embed.description = "报警系统未初始化"
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            logger.info(f"用户 {interaction.user} 查看了报警历史")
+        except Exception as e:
+            logger.error(f"查看报警历史失败: {e}", exc_info=True)
+            await interaction.followup.send("查看报警历史失败，请稍后重试", ephemeral=True)
     
     async def view_positions(self, interaction: discord.Interaction):
         """查看持仓"""
@@ -638,23 +659,13 @@ class TradingDashboard(commands.Cog, name="交易面板"):
     async def quick_actions(self, interaction: discord.Interaction):
         """快速操作"""
         try:
-            # 先发送延迟响应
-            await interaction.response.defer(ephemeral=True)
-            
-            # 创建快速操作面板嵌入消息
-            embed = discord.Embed(
-                title="🚀 快速操作",
-                description="使用下面的按钮快速执行常见操作",
-                color=discord.Color.blue()
-            )
-            
-            # 使用 followup 发送实际响应
+            # ... (代码) ...
+            # 【修改】确保在创建 View 时传递了 self.bot
             await interaction.followup.send(
                 embed=embed,
-                view=QuickActionsView(),
+                view=QuickActionsView(self.bot),
                 ephemeral=True
             )
-            
         except Exception as e:
             logger.error(f"打开快速操作面板失败: {e}", exc_info=True)
             try:
