@@ -1,4 +1,3 @@
-
 import logging
 import discord
 from discord import app_commands
@@ -84,8 +83,9 @@ class TradingCommands(commands.Cog, name="交易系统"):
             
             logger.info("更新宏观状态缓存...")
             try:
-                from src.database import get_db_connection
-                async with get_db_connection() as conn:
+                from src.database import db_pool
+                conn = db_pool.get_simple_session()
+                try:
                     cursor = await conn.execute('SELECT symbol, status FROM tv_status')
                     rows = await cursor.fetchall()
                     tv_status = {row['symbol']: row['status'] for row in rows}
@@ -98,6 +98,8 @@ class TradingCommands(commands.Cog, name="交易系统"):
                         'last_update': current_time
                     }
                     app_state._last_macro_update = current_time
+                finally:
+                    await conn.close()
             except Exception as e:
                 logger.error(f"获取宏观状态失败: {e}")
                 if not hasattr(app_state, '_macro_status'):
