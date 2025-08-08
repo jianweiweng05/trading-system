@@ -7,6 +7,7 @@ import asyncio
 from typing import Optional, Dict, Any
 from fastapi import FastAPI # 【修改】导入 FastAPI 用于类型注解
 from src.config import CONFIG
+from src.database import db_pool  # 【修改】移到顶部导入
 
 # ================= 日志配置 =================
 logging.basicConfig(
@@ -86,11 +87,9 @@ class TradingCommands(commands.Cog, name="交易系统"):
             last_error = None
             for attempt in range(CONFIG.db_retry_attempts):
                 try:
-                    from src.database import db_pool
-                    conn = db_pool.get_simple_session()
-                    try:
-                        cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
-                        rows = await cursor.fetchall()
+                    async with db_pool.get_simple_session() as conn:
+                        result = await conn.execute(text('SELECT symbol, status FROM tv_status'))
+                        rows = await result.fetchall()
                         tv_status = {row['symbol']: row['status'] for row in rows}
                         
                         app_state._macro_status = {
@@ -102,8 +101,6 @@ class TradingCommands(commands.Cog, name="交易系统"):
                         }
                         app_state._last_macro_update = current_time
                         break
-                    finally:
-                        await conn.close()
                 except Exception as e:
                     last_error = e
                     if attempt < CONFIG.db_retry_attempts - 1:
