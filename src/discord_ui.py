@@ -32,6 +32,12 @@ class TradingModeView(View):
         self.live_button.callback = self.switch_to_live
         self.add_item(self.live_button)
     
+    def update_to_live_mode(self):
+        """更新到实盘模式的按钮状态"""
+        self.sim_button.style = discord.ButtonStyle.grey
+        self.live_button.style = discord.ButtonStyle.green
+        self.current_mode = "live"
+    
     async def switch_to_simulate(self, interaction: discord.Interaction):
         """切换到模拟交易模式"""
         if self.current_mode == "simulate":
@@ -71,7 +77,7 @@ class TradingModeView(View):
             return
         
         # 添加确认对话框
-        confirm_view = ConfirmView()
+        confirm_view = ConfirmView(self)
         await interaction.response.send_message(
             "⚠️ 确定要切换到实盘交易模式吗？这将使用真实资金进行交易。",
             view=confirm_view,
@@ -90,9 +96,9 @@ class TradingModeView(View):
 
 class ConfirmView(View):
     """确认对话框"""
-    def __init__(self, parent_view: TradingModeView): # 【修改】接收 parent_view
+    def __init__(self, parent_view: TradingModeView):
         super().__init__(timeout=30)
-        self.parent_view = parent_view # 【修改】保存 parent_view
+        self.parent_view = parent_view
         
         self.confirm = Button(label="确认", style=discord.ButtonStyle.green, custom_id="confirm_live")
         self.confirm.callback = self.confirm_switch
@@ -105,13 +111,13 @@ class ConfirmView(View):
     async def confirm_switch(self, interaction: discord.Interaction):
         """确认切换到实盘模式"""
         try:
-            # 【修改】更新 CONFIG
+            # 更新 CONFIG
             CONFIG.run_mode = "live"
             
-            # 【修改】通过保存的 parent_view，调用它的方法来更新按钮状态
+            # 通过保存的 parent_view，调用它的方法来更新按钮状态
             self.parent_view.update_to_live_mode()
             
-            # 【修改】同时更新父视图的消息和当前确认框的消息
+            # 同时更新父视图的消息和当前确认框的消息
             await self.parent_view.message.edit(view=self.parent_view)
             await interaction.response.edit_message(content="✅ 已成功切换到实盘交易模式", view=None)
             
@@ -119,10 +125,6 @@ class ConfirmView(View):
         except Exception as e:
             logger.error(f"切换到实盘交易模式失败: {e}", exc_info=True)
             await interaction.response.edit_message(content="❌ 切换失败，请稍后重试", view=None)
-    
-    async def cancel_switch(self, interaction: discord.Interaction):
-        """取消切换"""
-        await interaction.response.edit_message(content="❌ 已取消切换", view=None)
     
     async def cancel_switch(self, interaction: discord.Interaction):
         """取消切换"""
@@ -312,7 +314,7 @@ class QuickActionsView(View):
             status_text = f"🟢 状态: 运行中 | ⚙️ 模式: {'模拟' if CONFIG.run_mode == 'simulate' else '实盘'}"
             embed.add_field(name="系统状态", value=status_text, inline=False)
             
-            # 【修改】从 app.state 安全地获取 trading_engine
+            # 从 app.state 安全地获取 trading_engine
             trading_engine = getattr(self.bot.app.state, 'trading_engine', None)
             
             macro_status, btc_status, eth_status = "未知", "未知", "未知"
@@ -369,7 +371,7 @@ class QuickActionsView(View):
             embed.add_field(name="📈 持仓/浮盈", value=pnl_text, inline=False)
             embed.add_field(name="持仓状态", value=position_text, inline=False)
             
-            # 【修改】从 app.state 安全地获取 alert_system
+            # 从 app.state 安全地获取 alert_system
             alert_system = getattr(self.bot.app.state, 'alert_system', None)
             if alert_system:
                 alert_status = alert_system.get_status()
@@ -390,7 +392,7 @@ class QuickActionsView(View):
             await interaction.response.defer(ephemeral=True)
             embed = discord.Embed(title="📊 当前持仓", color=discord.Color.blue())
             
-            # 【修改】从 app.state 安全地获取 trading_engine
+            # 从 app.state 安全地获取 trading_engine
             trading_engine = getattr(self.bot.app.state, 'trading_engine', None)
             
             if trading_engine:
@@ -419,7 +421,7 @@ class QuickActionsView(View):
             await interaction.response.defer(ephemeral=True)
             embed = discord.Embed(title="📋 报警历史", color=discord.Color.blue())
             
-            # 【修改】从 app.state 安全地获取 alert_system
+            # 从 app.state 安全地获取 alert_system
             alert_system = getattr(self.bot.app.state, 'alert_system', None)
             
             if alert_system:
@@ -439,130 +441,16 @@ class QuickActionsView(View):
             logger.error(f"查看报警历史失败: {e}", exc_info=True)
             await interaction.followup.send("查看报警历史失败，请稍后重试", ephemeral=True)
     
-    async def view_positions(self, interaction: discord.Interaction):
-        """查看持仓"""
-        try:
-            # 先发送延迟响应
-            await interaction.response.defer(ephemeral=True)
-            
-            # 获取交易引擎实例
-            trading_engine = None
-            if hasattr(self.bot, 'bot_data') and 'trading_engine' in self.bot.bot_data:
-                trading_engine = self.bot.bot_data['trading_engine']
-            
-            # 创建持仓信息嵌入消息
-            embed = discord.Embed(
-                title="📊 当前持仓",
-                color=discord.Color.blue()
-            )
-            
-            if trading_engine:
-                # 获取所有持仓
-                positions = await trading_engine.get_position("*")
-                if positions:
-                    for symbol, position in positions.items():
-                        size = float(position.get('size', 0))
-                        if size != 0:
-                            side = "多头" if size > 0 else "空头"
-                            pnl = float(position.get('pnl', 0))
-                            embed.add_field(
-                                name=f"{symbol} ({side})",
-                                value=f"数量: {abs(size)}\n浮盈: ${pnl:.2f}",
-                                inline=True
-                            )
-                else:
-                    embed.description = "暂无持仓"
-            else:
-                embed.description = "交易引擎未初始化"
-            
-            # 使用 followup 发送实际响应
-            await interaction.followup.send(embed=embed, ephemeral=True)
-            
-            # 记录日志
-            logger.info(f"用户 {interaction.user} 查看了持仓信息")
-            
-        except Exception as e:
-            logger.error(f"查看持仓失败: {e}", exc_info=True)
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("查看持仓失败，请稍后重试", ephemeral=True)
-                else:
-                    await interaction.followup.send("查看持仓失败，请稍后重试", ephemeral=True)
-            except Exception as followup_error:
-                logger.error(f"发送错误消息失败: {followup_error}")
-    
-    async def view_alerts(self, interaction: discord.Interaction):
-        """查看报警历史"""
-        try:
-            # 先发送延迟响应
-            await interaction.response.defer(ephemeral=True)
-            
-            # 创建报警历史嵌入消息
-            embed = discord.Embed(
-                title="📋 报警历史",
-                color=discord.Color.blue()
-            )
-            
-            # 获取报警系统实例
-            if hasattr(self.bot, 'bot_data') and 'alert_system' in self.bot.bot_data:
-                alerts = self.bot.bot_data['alert_system'].get_alerts()
-                if alerts:
-                    for alert in alerts[-5:]:  # 显示最近5条报警
-                        timestamp = int(alert['timestamp'])
-                        embed.add_field(
-                            name=f"{alert['type']} ({alert['level']})",
-                            value=f"{alert['message']}\n<t:{timestamp}:R>",
-                            inline=False
-                        )
-                else:
-                    embed.description = "暂无报警记录"
-            else:
-                embed.description = "报警系统未初始化"
-            
-            # 使用 followup 发送实际响应
-            await interaction.followup.send(
-                embed=embed,
-                view=QuickActionsView(self.bot),
-                ephemeral=True
-            )
-            
-            # 记录日志
-            logger.info(f"用户 {interaction.user} 查看了报警历史")
-            
-        except Exception as e:
-            logger.error(f"查看报警历史失败: {e}", exc_info=True)
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("查看报警历史失败，请稍后重试", ephemeral=True)
-                else:
-                    await interaction.followup.send("查看报警历史失败，请稍后重试", ephemeral=True)
-            except Exception as followup_error:
-                logger.error(f"发送错误消息失败: {followup_error}")
-    
     async def save_config(self, interaction: discord.Interaction):
         """保存配置"""
         try:
-            # 先发送延迟响应
             await interaction.response.defer(ephemeral=True)
-            
-            # 这里添加保存配置逻辑
-            # 例如：将配置保存到数据库
-            
-            # 使用 followup 发送实际响应
+            # TODO: 实现保存配置逻辑
             await interaction.followup.send("✅ 配置已保存", ephemeral=True)
-            
-            # 记录日志
             logger.info(f"用户 {interaction.user} 保存了配置")
-            
         except Exception as e:
             logger.error(f"保存配置失败: {e}", exc_info=True)
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("❌ 保存失败，请稍后重试", ephemeral=True)
-                else:
-                    await interaction.followup.send("❌ 保存失败，请稍后重试", ephemeral=True)
-            except Exception as followup_error:
-                logger.error(f"发送错误消息失败: {followup_error}")
+            await interaction.followup.send("❌ 保存失败，请稍后重试", ephemeral=True)
 
 class TradingDashboard(commands.Cog, name="交易面板"):
     """交易系统控制面板"""
@@ -574,55 +462,36 @@ class TradingDashboard(commands.Cog, name="交易面板"):
     async def dashboard(self, interaction: discord.Interaction):
         """打开交易控制面板"""
         try:
-            # 先发送延迟响应
             await interaction.response.defer(ephemeral=True)
-            
-            # 创建主面板嵌入消息
             embed = discord.Embed(
                 title="🎛️ 交易控制面板",
                 description="选择下面的选项来控制交易系统",
                 color=discord.Color.blue()
             )
-            
-            # 添加状态信息
             embed.add_field(
                 name="当前模式",
                 value="🔴 模拟交易" if CONFIG.run_mode == "simulate" else "✅ 实盘交易",
                 inline=False
             )
-            
-            # 使用 followup 发送实际响应
             await interaction.followup.send(
                 embed=embed,
                 view=TradingModeView(),
                 ephemeral=True
             )
-            
         except Exception as e:
             logger.error(f"打开交易控制面板失败: {e}", exc_info=True)
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("❌ 打开面板失败，请稍后重试", ephemeral=True)
-                else:
-                    await interaction.followup.send("❌ 打开面板失败，请稍后重试", ephemeral=True)
-            except Exception as followup_error:
-                logger.error(f"发送错误消息失败: {followup_error}")
+            await interaction.followup.send("❌ 打开面板失败，请稍后重试", ephemeral=True)
 
     @app_commands.command(name="parameters", description="调整交易参数")
     async def parameters(self, interaction: discord.Interaction):
         """调整交易参数"""
         try:
-            # 先发送延迟响应
             await interaction.response.defer(ephemeral=True)
-            
-            # 创建参数面板嵌入消息
             embed = discord.Embed(
                 title="⚙️ 交易参数设置",
                 description="调整下面的参数来改变交易策略的行为",
                 color=discord.Color.blue()
             )
-            
-            # 添加当前参数值
             embed.add_field(
                 name="杠杆系数",
                 value=f"{getattr(CONFIG, 'leverage', 5.0)}x",
@@ -638,43 +507,30 @@ class TradingDashboard(commands.Cog, name="交易面板"):
                 value=getattr(CONFIG, 'allocation', 'balanced'),
                 inline=True
             )
-            
-            # 使用 followup 发送实际响应
             await interaction.followup.send(
                 embed=embed,
                 view=ParameterControlView(),
                 ephemeral=True
             )
-            
         except Exception as e:
             logger.error(f"打开参数设置面板失败: {e}", exc_info=True)
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("❌ 打开参数面板失败，请稍后重试", ephemeral=True)
-                else:
-                    await interaction.followup.send("❌ 打开参数面板失败，请稍后重试", ephemeral=True)
-            except Exception as followup_error:
-                logger.error(f"发送错误消息失败: {followup_error}")
+            await interaction.followup.send("❌ 打开参数面板失败，请稍后重试", ephemeral=True)
 
     @app_commands.command(name="quick_actions", description="快速操作")
     async def quick_actions(self, interaction: discord.Interaction):
         """快速操作"""
         try:
             await interaction.response.defer(ephemeral=True)
-            
-            # 【修改】补上了之前审查报告中指出的、被遗漏的 embed 创建代码
             embed = discord.Embed(
                 title="🚀 快速操作",
                 description="使用下面的按钮快速执行常见操作",
                 color=discord.Color.blue()
             )
-            
             await interaction.followup.send(
                 embed=embed,
                 view=QuickActionsView(self.bot),
                 ephemeral=True
             )
-            
         except Exception as e:
             logger.error(f"打开快速操作面板失败: {e}", exc_info=True)
             await interaction.followup.send("❌ 打开快速操作面板失败，请稍后重试", ephemeral=True)
