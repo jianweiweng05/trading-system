@@ -122,7 +122,6 @@ class TradingCommands(commands.Cog, name="交易系统"):
         
         return getattr(app_state, '_macro_status', {}).copy()
 
-    # --- 【修改】将重复逻辑提取到这个辅助函数中 ---
     async def _create_status_embed(self) -> discord.Embed:
         """创建一个包含当前系统状态的 Discord Embed 对象"""
         embed = discord.Embed(
@@ -130,16 +129,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
             color=discord.Color.green()
         )
         embed.add_field(name="运行模式", value=CONFIG.run_mode)
-        embed.add_field(name="Bot状态", value="🟢 在线")
-        embed.add_field(name="延迟", value=f"{round(self.bot.latency * 1000)} ms")
-        
-        macro_status = await self.get_macro_status()
-        macro_text = f"""宏观：{macro_status.get('trend', '未知')}
-BTC1d ({macro_status.get('btc1d', '未知')})
-ETH1d ({macro_status.get('eth1d', '未知')})"""
-        embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
-        
-        return embed
+        embed.add_field(name="Bot
 
     # --- 【修改】简化 text_status，调用辅助函数 ---
     @commands.command(name="status", help="查看系统状态")
