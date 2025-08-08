@@ -314,7 +314,7 @@ class QuickActionsView(View):
             status_text = f"🟢 状态: 运行中 | ⚙️ 模式: {'模拟' if CONFIG.run_mode == 'simulate' else '实盘'}"
             embed.add_field(name="系统状态", value=status_text, inline=False)
             
-            # 从 app.state 安全地获取 trading_engine
+            # 【修改】使用正确的状态访问方式
             trading_engine = getattr(self.bot.app.state, 'trading_engine', None)
             
             macro_status, btc_status, eth_status = "未知", "未知", "未知"
@@ -371,7 +371,7 @@ class QuickActionsView(View):
             embed.add_field(name="📈 持仓/浮盈", value=pnl_text, inline=False)
             embed.add_field(name="持仓状态", value=position_text, inline=False)
             
-            # 从 app.state 安全地获取 alert_system
+            # 【修改】使用正确的状态访问方式
             alert_system = getattr(self.bot.app.state, 'alert_system', None)
             if alert_system:
                 alert_status = alert_system.get_status()
@@ -392,7 +392,7 @@ class QuickActionsView(View):
             await interaction.response.defer(ephemeral=True)
             embed = discord.Embed(title="📊 当前持仓", color=discord.Color.blue())
             
-            # 从 app.state 安全地获取 trading_engine
+            # 【修改】使用正确的状态访问方式
             trading_engine = getattr(self.bot.app.state, 'trading_engine', None)
             
             if trading_engine:
@@ -421,7 +421,7 @@ class QuickActionsView(View):
             await interaction.response.defer(ephemeral=True)
             embed = discord.Embed(title="📋 报警历史", color=discord.Color.blue())
             
-            # 从 app.state 安全地获取 alert_system
+            # 【修改】使用正确的状态访问方式
             alert_system = getattr(self.bot.app.state, 'alert_system', None)
             
             if alert_system:
