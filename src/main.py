@@ -2,8 +2,7 @@
 import logging
 import asyncio
 import time
-import hmac
-import hashlib
+# 【修改】移除了未使用的 hmac 和 hashlib
 import os
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
@@ -36,69 +35,57 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- 全局变量 ---
-REQUEST_LOG: Dict[str, list] = {}
+# --- 【修改】移除了未使用的 REQUEST_LOG 全局变量 ---
 
 # --- TV状态数据库操作 ---
-async def init_tv_status_table():
+# --- 【修改】统一使用 async with 并添加类型注解 ---
+async def init_tv_status_table() -> None:
     """初始化TV状态表"""
-    conn = None
     try:
         from src.database import db_pool
-        conn = await db_pool.get_simple_session()
-        await conn.execute(text('''
-            CREATE TABLE IF NOT EXISTS tv_status (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol VARCHAR(10) NOT NULL UNIQUE,
-                status VARCHAR(20) NOT NULL,
-                timestamp REAL NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        '''))
-        await conn.commit()
+        async with db_pool.get_simple_session() as conn:
+            await conn.execute(text('''
+                CREATE TABLE IF NOT EXISTS tv_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol VARCHAR(10) NOT NULL UNIQUE,
+                    status VARCHAR(20) NOT NULL,
+                    timestamp REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            '''))
+            await conn.commit()
     except Exception as e:
         logger.error(f"初始化TV状态表失败: {e}")
         raise
-    finally:
-        if conn:
-            await conn.close()
 
 async def load_tv_status() -> Dict[str, str]:
     """从数据库加载TV状态"""
     status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
-    conn = None
     try:
         from src.database import db_pool
-        conn = await db_pool.get_simple_session()
-        cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
-        rows = await cursor.fetchall()
-        for row in rows:
-            status[row['symbol']] = row['status']
+        async with db_pool.get_simple_session() as conn:
+            cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
+            rows = await cursor.fetchall()
+            for row in rows:
+                status[row['symbol']] = row['status']
     except Exception as e:
         logger.error(f"加载TV状态失败: {e}")
-    finally:
-        if conn:
-            await conn.close()
     return status
 
-async def save_tv_status(symbol: str, status: str):
+async def save_tv_status(symbol: str, status: str) -> None:
     """保存TV状态到数据库"""
-    conn = None
     try:
         from src.database import db_pool
-        conn = await db_pool.get_simple_session()
-        await conn.execute(text('''
-            INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
-            VALUES (?, ?, ?)
-        '''), (symbol, status, time.time()))
-        await conn.commit()
+        async with db_pool.get_simple_session() as conn:
+            await conn.execute(text('''
+                INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
+                VALUES (?, ?, ?)
+            '''), (symbol, status, time.time()))
+            await conn.commit()
     except Exception as e:
         logger.error(f"保存TV状态失败: {e}")
-    finally:
-        if conn:
-            await conn.close()
 
-# --- 安全启动任务包装函数 ---
+# --- 安全启动任务包装函数 (保持不变) ---
 async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
     """安全启动任务的包装函数"""
     try:
@@ -109,7 +96,7 @@ async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
         logger.error(f"❌ {name} 启动任务失败: {e}", exc_info=True)
         return None
 
-# --- 生命周期管理 ---
+# --- 生命周期管理 (保持不变) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -235,7 +222,7 @@ app = FastAPI(
     debug=False
 )
 
-# --- 路由定义 ---
+# --- 路由定义 (保持不变) ---
 @app.get("/")
 async def root() -> Dict[str, Any]:
     return {
@@ -316,7 +303,7 @@ async def get_tv_status():
         logger.error(f"获取TV状态失败: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# --- 主函数 ---
+# --- 主函数 (保持不变) ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     logger.info(f"启动服务器，端口: {port}")
