@@ -1,4 +1,6 @@
+
 import logging
+import asyncio # 【修改】导入我们需要的 asyncio 库
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from .ai_client import AIClient
@@ -104,14 +106,31 @@ class BlackSwanRadar:
         logger.info("未检测到黑天鹅风险信号")
         return None
 
+# --- 【这里是核心修改】 ---
 # 黑天鹅雷达启动函数
-async def start_black_swan_radar() -> Optional[Dict[str, Any]]:
-    """启动黑天鹅雷达的入口函数"""
-    from src.config import CONFIG
+async def start_black_swan_radar():
+    """
+    启动黑天鹅雷达的入口函数。
+    这个函数现在包含一个无限循环，每30分钟执行一次扫描。
+    """
     radar = BlackSwanRadar(CONFIG.deepseek_api_key)
-    return await radar.scan_and_alert()
+    
+    while True:
+        try:
+            await radar.scan_and_alert()
+            
+            # 扫描完成后，强制休息30分钟（1800秒）
+            logger.info("黑天鹅雷达完成一次扫描，将休眠30分钟...")
+            await asyncio.sleep(1800)
+            
+        except Exception as e:
+            logger.error(f"黑天鹅雷达在循环中遇到错误: {e}", exc_info=True)
+            # 即使发生错误，也等待一段时间再重试，避免快速失败导致CPU占满
+            await asyncio.sleep(60)
+
 
 if __name__ == "__main__":
+    # 这部分保持不变，用于单独测试此文件
     import asyncio
     try:
         asyncio.run(start_black_swan_radar())
