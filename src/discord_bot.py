@@ -6,7 +6,6 @@ from discord.ext import commands
 import asyncio
 from typing import Optional, Dict, Any
 from fastapi import FastAPI # 【修改】导入 FastAPI 用于类型注解
-from sqlalchemy import text
 from src.config import CONFIG
 from src.database import db_pool  # 【修改】移到顶部导入
 
