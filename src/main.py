@@ -1,5 +1,6 @@
 import logging
 import time
+import asyncio  # 【修改】添加 asyncio 导入
 from typing import Dict, Optional  # 【修改】添加 Optional
 from sqlalchemy import text
 from contextlib import asynccontextmanager  # 【修改】添加缺失的导入
