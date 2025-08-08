@@ -6,6 +6,7 @@ from discord.ext import commands
 import asyncio
 from typing import Optional, Dict, Any
 from fastapi import FastAPI # 【修改】导入 FastAPI 用于类型注解
+from sqlalchemy import text
 from src.config import CONFIG
 from src.database import db_pool  # 【修改】移到顶部导入
 
@@ -75,24 +76,24 @@ class TradingCommands(commands.Cog, name="交易系统"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
    
+# --- 请用这段新代码，替换你现有的 get_macro_status 整个函数 ---
+
     async def get_macro_status(self) -> Dict[str, Any]:
         """获取宏观状态信息"""
         current_time = asyncio.get_event_loop().time()
         app_state = self.bot.app.state
         
-        # 缓存检查逻辑保持不变
         if (not hasattr(app_state, '_macro_status') or 
             current_time - getattr(app_state, '_last_macro_update', 0) > 300):
             
             logger.info("更新宏观状态缓存...")
-            conn = None # 【修改】预定义 conn
+            conn = None
             try:
-                # --- 【修改】使用正确的数据库连接方式 ---
                 from src.database import db_pool
                 conn = await db_pool.get_simple_session()
-                cursor = await conn.execute('SELECT symbol, status FROM tv_status')
+                # 【修改】将 SQL 字符串用 text() 包裹起来
+                cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
                 rows = await cursor.fetchall()
-                # --- 结束修改 ---
                 
                 tv_status = {row['symbol']: row['status'] for row in rows}
                 
@@ -116,7 +117,6 @@ class TradingCommands(commands.Cog, name="交易系统"):
                         'last_update': current_time
                     }
             finally:
-                # 【修改】确保连接被关闭
                 if conn:
                     await conn.close()
         
