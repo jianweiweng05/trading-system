@@ -1,3 +1,4 @@
+from sqlalchemy import text
 import logging
 import discord
 from discord import app_commands
@@ -86,7 +87,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
                 from src.database import db_pool
                 conn = db_pool.get_simple_session()
                 try:
-                    cursor = await conn.execute('SELECT symbol, status FROM tv_status')
+                    cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
                     rows = await cursor.fetchall()
                     tv_status = {row['symbol']: row['status'] for row in rows}
                     
