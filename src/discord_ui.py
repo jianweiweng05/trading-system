@@ -659,19 +659,21 @@ class TradingDashboard(commands.Cog, name="交易面板"):
     async def quick_actions(self, interaction: discord.Interaction):
         """快速操作"""
         try:
-            # ... (代码) ...
-            # 【修改】确保在创建 View 时传递了 self.bot
+            await interaction.response.defer(ephemeral=True)
+            
+            # 【修改】补上了之前审查报告中指出的、被遗漏的 embed 创建代码
+            embed = discord.Embed(
+                title="🚀 快速操作",
+                description="使用下面的按钮快速执行常见操作",
+                color=discord.Color.blue()
+            )
+            
             await interaction.followup.send(
                 embed=embed,
                 view=QuickActionsView(self.bot),
                 ephemeral=True
             )
+            
         except Exception as e:
             logger.error(f"打开快速操作面板失败: {e}", exc_info=True)
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message("❌ 打开快速操作面板失败，请稍后重试", ephemeral=True)
-                else:
-                    await interaction.followup.send("❌ 打开快速操作面板失败，请稍后重试", ephemeral=True)
-            except Exception as followup_error:
-                logger.error(f"发送错误消息失败: {followup_error}")
+            await interaction.followup.send("❌ 打开快速操作面板失败，请稍后重试", ephemeral=True)
