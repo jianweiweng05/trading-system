@@ -80,37 +80,46 @@ class TradingCommands(commands.Cog, name="交易系统"):
         app_state = self.bot.app.state
         
         if (not hasattr(app_state, '_macro_status') or 
-            current_time - getattr(app_state, '_last_macro_update', 0) > 300):
+            current_time - getattr(app_state, '_last_macro_update', 0) > CONFIG.macro_cache_timeout):
             
             logger.info("更新宏观状态缓存...")
-            try:
-                from src.database import db_pool
-                conn = db_pool.get_simple_session()
+            last_error = None
+            for attempt in range(CONFIG.db_retry_attempts):
                 try:
-                    cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
-                    rows = await cursor.fetchall()
-                    tv_status = {row['symbol']: row['status'] for row in rows}
-                    
-                    app_state._macro_status = {
-                        'trend': '未知',
-                        'btc1d': tv_status.get('btc', CONFIG.default_btc_status),
-                        'eth1d': tv_status.get('eth', CONFIG.default_eth_status),
-                        'confidence': 0,
-                        'last_update': current_time
-                    }
-                    app_state._last_macro_update = current_time
-                finally:
-                    await conn.close()
-            except Exception as e:
-                logger.error(f"获取宏观状态失败: {e}")
-                if not hasattr(app_state, '_macro_status'):
-                    app_state._macro_status = {
-                        'trend': '未知',
-                        'btc1d': CONFIG.default_btc_status,
-                        'eth1d': CONFIG.default_eth_status,
-                        'confidence': 0,
-                        'last_update': current_time
-                    }
+                    from src.database import db_pool
+                    conn = db_pool.get_simple_session()
+                    try:
+                        cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
+                        rows = await cursor.fetchall()
+                        tv_status = {row['symbol']: row['status'] for row in rows}
+                        
+                        app_state._macro_status = {
+                            'trend': '未知',
+                            'btc1d': tv_status.get('btc', CONFIG.default_btc_status),
+                            'eth1d': tv_status.get('eth', CONFIG.default_eth_status),
+                            'confidence': 0,
+                            'last_update': current_time
+                        }
+                        app_state._last_macro_update = current_time
+                        break
+                    finally:
+                        await conn.close()
+                except Exception as e:
+                    last_error = e
+                    if attempt < CONFIG.db_retry_attempts - 1:
+                        logger.warning(f"获取宏观状态失败，{CONFIG.db_retry_delay}秒后重试 (尝试 {attempt + 1}/{CONFIG.db_retry_attempts}): {e}")
+                        await asyncio.sleep(CONFIG.db_retry_delay)
+                    else:
+                        logger.error(f"获取宏观状态失败，已达到最大重试次数: {e}")
+            
+            if last_error is not None and not hasattr(app_state, '_macro_status'):
+                app_state._macro_status = {
+                    'trend': '未知',
+                    'btc1d': CONFIG.default_btc_status,
+                    'eth1d': CONFIG.default_eth_status,
+                    'confidence': 0,
+                    'last_update': current_time
+                }
         
         return getattr(app_state, '_macro_status', {}).copy()
 
