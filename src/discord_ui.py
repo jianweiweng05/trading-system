@@ -261,14 +261,11 @@ class FirepowerModal(Modal, title="设置火力系数"):
             logger.error(f"更新火力系数失败: {e}", exc_info=True)
             await interaction.response.send_message("更新失败，请稍后重试", ephemeral=True)
 
-# --- 请用这段新代码，替换你现有的 QuickActionsView 整个类 ---
-
 class QuickActionsView(View):
     """快速操作视图"""
-    # 【修改】__init__ 方法被恢复并修正，现在接收 bot
     def __init__(self, bot: commands.Bot):
         super().__init__(timeout=None)
-        self.bot = bot # 保存 bot 实例，以便后续使用
+        self.bot = bot
         
         # 刷新按钮
         self.refresh_button = Button(
@@ -523,7 +520,11 @@ class QuickActionsView(View):
                 embed.description = "报警系统未初始化"
             
             # 使用 followup 发送实际响应
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(
+                embed=embed,
+                view=QuickActionsView(self.bot),
+                ephemeral=True
+            )
             
             # 记录日志
             logger.info(f"用户 {interaction.user} 查看了报警历史")
