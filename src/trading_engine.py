@@ -205,10 +205,20 @@ class TradingEngine:
             return False
     
     async def get_position(self, symbol: str) -> Dict[str, Any]:
-        """获取持仓信息"""
+        """获取指定交易对或所有持仓信息"""
         try:
-            positions = await self.exchange.fetch_positions([symbol])
-            return positions[0] if positions else {}
+            # 【修改】不再使用"*"，而是调用不带参数的 fetch_positions 获取所有持仓
+            all_positions = await self.exchange.fetch_positions()
+            
+            # 将列表转换为以符号为键的字典，方便访问
+            positions_dict = {p['symbol']: p for p in all_positions}
+
+            if symbol == "*":
+                return positions_dict
+            else:
+                # 如果请求的是单个符号，就从字典里找
+                return {symbol: positions_dict.get(symbol)} if symbol in positions_dict else {}
+
         except Exception as e:
             logger.error(f"获取持仓失败: {e}")
             return {}
