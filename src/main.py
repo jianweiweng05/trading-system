@@ -1,52 +1,17 @@
-
 import logging
-import asyncio
 import time
-import hmac
-import hashlib
-import os
-from contextlib import asynccontextmanager
-from typing import Optional, Dict, Any
-
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from typing import Dict
 from sqlalchemy import text
-from ccxt.async_support import binance
-import uvicorn
+from contextlib import asynccontextmanager  # 【修改】添加缺失的导入
+from src.config import CONFIG  # 【修改】添加缺失的导入
 
-# --- 导入配置 ---
-from src.config import CONFIG
-# --- 导入系统状态模块 ---
-from src.system_state import SystemState
-# --- 导入AI分析器 ---
-from src.ai.macro_analyzer import MacroAnalyzer
-# --- 导入黑天鹅雷达 ---
-from src.ai.black_swan_radar import start_black_swan_radar
-# --- 导入报警系统 ---
-from src.alert_system import AlertSystem
-# --- 导入交易引擎 ---
-from src.trading_engine import TradingEngine
-# --- 导入 Discord Bot 启动器 ---
-from src.discord_bot import start_discord_bot as run_discord_bot, stop_bot_services
-
-# --- 日志配置 ---
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
 logger = logging.getLogger(__name__)
 
-# --- 全局变量 ---
-# 【审查建议】REQUEST_LOG 未使用，暂时保留，但未来可以考虑移除
-REQUEST_LOG: Dict[str, list] = {}
-
-# --- TV状态数据库操作 (保持不变) ---
 async def init_tv_status_table():
     """初始化TV状态表"""
     try:
         from src.database import db_pool
-        conn = db_pool.get_simple_session()
-        try:
+        async with db_pool.get_simple_session() as conn:
             await conn.execute(text('''
                 CREATE TABLE IF NOT EXISTS tv_status (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,25 +22,20 @@ async def init_tv_status_table():
                 )
             '''))
             await conn.commit()
-        finally:
-            await conn.close()
     except Exception as e:
         logger.error(f"初始化TV状态表失败: {e}")
-        raise
+        raise  # 【修改】修复缩进
 
 async def load_tv_status() -> Dict[str, str]:
     """从数据库加载TV状态"""
     status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
     try:
         from src.database import db_pool
-        conn = db_pool.get_simple_session()
-        try:
-            cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
-            rows = await cursor.fetchall()
+        async with db_pool.get_simple_session() as conn:  # 【修改】统一使用 async with
+            result = await conn.execute(text('SELECT symbol, status FROM tv_status'))
+            rows = await result.fetchall()
             for row in rows:
                 status[row['symbol']] = row['status']
-        finally:
-            await conn.close()
     except Exception as e:
         logger.error(f"加载TV状态失败: {e}")
     return status
@@ -84,17 +44,15 @@ async def save_tv_status(symbol: str, status: str):
     """保存TV状态到数据库"""
     try:
         from src.database import db_pool
-        conn = db_pool.get_simple_session()
-        try:
+        async with db_pool.get_simple_session() as conn:  # 【修改】统一使用 async with
             await conn.execute(text('''
                 INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
                 VALUES (?, ?, ?)
             '''), (symbol, status, time.time()))
             await conn.commit()
-        finally:
-            await conn.close()
     except Exception as e:
         logger.error(f"保存TV状态失败: {e}")
+        raise RuntimeError("保存TV状态失败") from e  # 【修改】保持异常链
 
 # --- 【修改】安全启动任务包装函数，扩大异常捕获范围 ---
 async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
