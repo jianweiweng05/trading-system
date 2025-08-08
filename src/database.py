@@ -95,7 +95,8 @@ class DatabaseConnectionPool:
         self.session_factory = sessionmaker(
             engine,
             class_=AsyncSession,
-            expire_on_commit=False
+            expire_on_commit=False,
+            autocommit=False  # 【修改】添加 autocommit=False 参数
         )
     
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -110,9 +111,11 @@ class DatabaseConnectionPool:
             finally:
                 await session.close()
     
-    def get_simple_session(self) -> AsyncSession:
+    async def get_simple_session(self) -> AsyncSession:  # 【修改】改为异步方法
         """获取简单的数据库会话"""
-        return self.session_factory()
+        session = self.session_factory()
+        await session.begin()  # 【修改】显式开启事务
+        return session
 
 async def init_db() -> None:
     """初始化数据库"""
