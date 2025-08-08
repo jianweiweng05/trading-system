@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Dict
+from typing import Dict, Optional  # 【修改】添加 Optional
 from sqlalchemy import text
 from contextlib import asynccontextmanager  # 【修改】添加缺失的导入
 from src.config import CONFIG  # 【修改】添加缺失的导入
