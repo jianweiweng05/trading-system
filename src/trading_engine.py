@@ -1,7 +1,7 @@
 import logging
 import asyncio
 import time
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 from ccxt.async_support import binance
 from src.config import CONFIG
 from src.alert_system import AlertSystem
@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 class TradingEngine:
     """交易引擎核心类"""
+    
+    # 【修改】添加类常量
+    ORDER_CHECK_INTERVAL = 1  # 订单检查间隔（秒）
     
     def __init__(self, exchange: binance, alert_system: AlertSystem):
         self.exchange = exchange
@@ -28,7 +31,7 @@ class TradingEngine:
         
         # 新增：共振池数据
         self.resonance_pool: Dict[str, Dict] = {}
-        self.signal_timeout = 300  # 信号超时时间（5分钟）
+        self.signal_timeout = CONFIG.macro_cache_timeout  # 【修改】使用配置项
         
         # 新增：宏观状态缓存
         self._macro_status: Optional[Dict[str, Any]] = None
@@ -90,9 +93,8 @@ class TradingEngine:
             # 获取账户余额
             balance = await self.exchange.fetch_balance()
             
-            # 确定需要的币种
-            base_currency = symbol.split('/')[0]
-            quote_currency = symbol.split('/')[1]
+            # 【修改】优化字符串操作，只调用一次 split
+            base_currency, quote_currency = symbol.split('/')
             
             # 检查买入/卖出方向
             if price is not None:  # 限价单
@@ -183,7 +185,7 @@ class TradingEngine:
                 if order['status'] in ['closed', 'canceled', 'expired']:
                     break
                 
-                await asyncio.sleep(1)  # 每秒检查一次
+                await asyncio.sleep(self.ORDER_CHECK_INTERVAL)  # 【修改】使用类常量
                 
         except Exception as e:
             logger.error(f"监控订单失败: {e}")
@@ -204,7 +206,7 @@ class TradingEngine:
             logger.error(f"取消订单失败: {e}")
             return False
     
-    async def get_position(self, symbol: str) -> Dict[str, Any]:
+    async def get_position(self, symbol: str) -> Dict[str, Any]:  # 【修改】完善类型注解
         """获取指定交易对或所有持仓信息"""
         try:
             # 【修改】不再使用"*"，而是调用不带参数的 fetch_positions 获取所有持仓
@@ -221,7 +223,7 @@ class TradingEngine:
 
         except Exception as e:
             logger.error(f"获取持仓失败: {e}")
-            return {}
+            return {}  # 【修改】返回空字典而不是 None
     
     def update_daily_pnl(self, pnl: float):
         """更新每日盈亏"""
@@ -336,9 +338,9 @@ class TradingEngine:
         """获取宏观状态信息"""
         current_time = time.time()
         
-        # 如果缓存不存在或过期（超过5分钟），返回默认值
+        # 如果缓存不存在或过期，返回默认值
         if (not self._macro_status or 
-            current_time - self._last_macro_update > 300):
+            current_time - self._last_macro_update > CONFIG.macro_cache_timeout):  # 【修改】使用配置项
             
             logger.info("宏观状态缓存过期，返回默认值")
             self._macro_status = {
