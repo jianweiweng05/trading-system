@@ -170,11 +170,13 @@ async def lifespan(app: FastAPI):
             start_black_swan_radar,
             "黑天鹅雷达"
         )
-        
-        # 8. 启动 Discord Bot
+      
+        # 8. 启动 Discord Bot (作为后台任务)
         if CONFIG.discord_token:
+            # 【修改】使用 lambda 将 app 对象传递给 run_discord_bot
+            start_func = lambda: run_discord_bot(app)
             background_tasks['discord_bot'] = await safe_start_task(
-                run_discord_bot,
+                start_func,
                 "Discord Bot"
             )
         else:
