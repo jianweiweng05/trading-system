@@ -19,29 +19,31 @@ class MacroAnalyzer:
         self._detailed_status: Optional[Dict[str, Any]] = None
         self._last_status_update: float = 0
     
-    # --- 【修改】get_macro_data 函数现在会加载历史数据和实时TV信号 ---
     async def get_macro_data(self) -> Dict[str, str]:
-        """获取宏观分析数据，现在会结合历史数据和最新的TV信号"""
+        """获取宏观分析数据，现在会批量加载并整合所有策略的历史数据"""
         
-        # 1. 加载静态的历史数据总结
         strategy_files = [
             "BTC1d.xlsx", "BTC10h.xlsx", "ETH1d多.xlsx", "ETH1d空.xlsx",
             "ETH4h.xlsx", "AVAX9h.xlsx", "SOL10h.xlsx", "ADA4h.xlsx"
         ]
+        
         all_summaries = []
-        SUMMARY_COLUMN_NAME = "策略总结" # <--- 请确保这个列名与你的 Excel 文件一致
+        # --- 【修改】在这里定义你的 Excel 总结列的真实列名 ---
+        SUMMARY_COLUMN_NAME = "你的总结列名" # <--- 请把 "你的总结列名" 换成真实的列名
 
         for filename in strategy_files:
             strategy_df = load_strategy_data(filename)
-            if strategy_df is not None and SUMMARY_COLUMN_NAME in strategy_df.columns:
-                summary_text = strategy_df[SUMMARY_COLUMN_NAME].iloc[0]
-                all_summaries.append(f"策略 {filename} 的回测总结: {summary_text}")
-            else:
-                logger.warning(f"在文件 {filename} 中找不到 '{SUMMARY_COLUMN_NAME}' 列，已跳过。")
+            
+            if strategy_df is not None and not strategy_df.empty:
+                if SUMMARY_COLUMN_NAME in strategy_df.columns:
+                    summary_text = strategy_df[SUMMARY_COLUMN_NAME].iloc[0]
+                    all_summaries.append(f"策略 {filename} 的回测总结: {summary_text}")
+                else:
+                    logger.warning(f"在文件 {filename} 中找不到 '{SUMMARY_COLUMN_NAME}' 列，已跳过。")
         
-        combined_summary = "\n".join(all_summaries) if all_summaries else "未能加载任何策略的历史数据。"
+        combined_summary = "\n".join(all_summaries)
 
-        # 2. 加载最新的、持久化的 TV 日线信号
+        from src.database import db_pool, text
         tv_status_summary = "TV 日线信号未知。"
         try:
             async with db_pool.get_session() as session:
@@ -53,12 +55,11 @@ class MacroAnalyzer:
         except Exception as e:
             logger.error(f"在宏观分析中加载TV状态失败: {e}")
 
-        # 3. 将所有信息整合后返回
         return {
-            "price_trend_summary": combined_summary,
+            "price_trend_summary": combined_summary if combined_summary else "未能加载任何策略的历史数据。",
             "onchain_summary": "链上数据分析待实现。",
             "funding_summary": "资金费率分析待实现。",
-            "current_signals": tv_status_summary # 新增字段，专门给AI看当前信号
+            "current_signals": tv_status_summary
         }
     
     async def analyze_market_status(self) -> Optional[Dict[str, Any]]:
