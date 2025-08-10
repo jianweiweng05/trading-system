@@ -2,7 +2,6 @@
 import logging
 import asyncio
 import time
-# 【修改】移除了未使用的 hmac 和 hashlib
 import os
 from contextlib import asynccontextmanager
 from typing import Optional, Dict, Any
@@ -27,6 +26,8 @@ from src.alert_system import AlertSystem
 from src.trading_engine import TradingEngine
 # --- 导入 Discord Bot 启动器 ---
 from src.discord_bot import start_discord_bot as run_discord_bot, stop_bot_services
+# --- 【修改】导入数据库函数 ---
+from src.database import get_setting
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -35,11 +36,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- 【修改】移除了未使用的 REQUEST_LOG 全局变量 ---
-
-# --- TV状态数据库操作 ---
-# --- 【修改】统一使用 async with 并添加类型注解 ---
-# --- TV状态数据库操作 ---
+# --- TV状态数据库操作 (保持不变) ---
 async def init_tv_status_table() -> None:
     """初始化TV状态表"""
     conn = None
@@ -94,36 +91,10 @@ async def save_tv_status(symbol: str, status: str) -> None:
         await conn.commit()
     except Exception as e:
         logger.error(f"保存TV状态失败: {e}")
+        raise
     finally:
         if conn:
             await conn.close()
-
-async def load_tv_status() -> Dict[str, str]:
-    """从数据库加载TV状态"""
-    status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
-    try:
-        from src.database import db_pool
-        async with db_pool.get_simple_session() as conn:
-            cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
-            rows = await cursor.fetchall()
-            for row in rows:
-                status[row['symbol']] = row['status']
-    except Exception as e:
-        logger.error(f"加载TV状态失败: {e}")
-    return status
-
-async def save_tv_status(symbol: str, status: str) -> None:
-    """保存TV状态到数据库"""
-    try:
-        from src.database import db_pool
-        async with db_pool.get_simple_session() as conn:
-            await conn.execute(text('''
-                INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
-                VALUES (?, ?, ?)
-            '''), (symbol, status, time.time()))
-            await conn.commit()
-    except Exception as e:
-        logger.error(f"保存TV状态失败: {e}")
 
 # --- 安全启动任务包装函数 (保持不变) ---
 async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
@@ -136,7 +107,7 @@ async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
         logger.error(f"❌ {name} 启动任务失败: {e}", exc_info=True)
         return None
 
-# --- 生命周期管理 (保持不变) ---
+# --- 【修改】生命周期管理，增加状态恢复逻辑 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -181,16 +152,24 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ 未配置Discord webhook，报警系统将不会启动")
             app.state.alert_system = None
         
-        # 5. 初始化 AI 分析器
-        app.state.macro_analyzer = MacroAnalyzer(api_key=CONFIG.deepseek_api_key)
+        # 5. 初始化 AI 分析器并恢复状态
+        macro_analyzer = MacroAnalyzer(api_key=CONFIG.deepseek_api_key)
+        # 从数据库恢复上一次的宏观状态
+        last_season = await get_setting('market_season')
+        if last_season:
+            macro_analyzer.last_known_season = last_season
+            logger.info(f"✅ 成功从数据库恢复宏观状态: {last_season}")
+        app.state.macro_analyzer = macro_analyzer
         logger.info("✅ 宏观分析器已初始化")
         
-        # 6. 初始化交易引擎
+        # 6. 初始化交易引擎并恢复状态
         if CONFIG.trading_engine:
             trading_engine = TradingEngine(
                 exchange=app.state.exchange,
                 alert_system=app.state.alert_system
             )
+            # 从数据库恢复共振池状态
+            await trading_engine.initialize()
             app.state.trading_engine = trading_engine
             logger.info("✅ 交易引擎已启动")
         
@@ -221,6 +200,7 @@ async def lifespan(app: FastAPI):
         await SystemState.set_state("ERROR")
         raise
     finally:
+        # ... (finally 块保持不变) ...
         logger.info("🛑 系统关闭中...")
         await SystemState.set_state("SHUTDOWN")
         
@@ -295,7 +275,7 @@ async def health_check(request: Request) -> Dict[str, Any]:
         except Exception:
             checks["exchange"] = False
             
-    if hasattr(app_state, 'alert_system') and app_state.alert_system:
+    if hasattr(app_state, 'alert_system') and app.state.alert_system:
         checks["alert_system"] = app_state.alert_system.is_running
     
     if hasattr(app_state, 'trading_engine') and app_state.trading_engine:
