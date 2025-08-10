@@ -1,14 +1,13 @@
-
 import logging
 import asyncio
 import time
 from typing import Optional, Dict, Any, List
 from ccxt.async_support import binance
-from sqlalchemy import select, insert, update, delete # 【修改】从 sqlalchemy 直接导入
+from sqlalchemy import select, insert, update, delete
 from src.config import CONFIG
 from src.alert_system import AlertSystem
-# 【修改】只从我们自己的 database 模块导入我们自己定义的东西
 from src.database import db_pool, ResonanceSignal
+
 logger = logging.getLogger(__name__)
 
 class TradingEngine:
@@ -307,3 +306,53 @@ class TradingEngine:
         }
         self._last_macro_update = time.time()
         logger.info(f"更新宏观状态: {trend}, BTC1d: {btc1d}, ETH1d: {eth1d}")
+
+    # --- 【修改】恢复为 async def ---
+    async def get_resonance_pool(self) -> Dict[str, Any]:
+        """获取共振池状态"""
+        current_time = time.time()
+        
+        expired_signals = [
+            signal_id for signal_id, signal_data in self.resonance_pool.items()
+            if current_time - signal_data['timestamp'] > self.signal_timeout
+        ]
+        
+        for signal_id in expired_signals:
+            # 在异步函数内部，调用另一个异步方法
+            await self.remove_signal(signal_id)
+        
+        pending_signals = [
+            signal_data for signal_data in self.resonance_pool.values()
+            if signal_data['status'] == 'pending'
+        ]
+        
+        logger.info(f"共振池状态: 信号总数={len(self.resonance_pool)}, 待处理={len(pending_signals)}")
+        
+        return {
+            'signals': self.resonance_pool,
+            'count': len(self.resonance_pool),
+            'pending_count': len(pending_signals),
+            'last_update': current_time
+        }
+
+    # --- 【修改】恢复为 async def ---
+    async def get_macro_status(self) -> Dict[str, Any]:
+        """获取宏观状态信息"""
+        current_time = time.time()
+        
+        if (not self._macro_status or 
+            current_time - self._last_macro_update > CONFIG.macro_cache_timeout):
+            
+            logger.info("宏观状态缓存过期，需要从 MacroAnalyzer 获取最新状态")
+            # 注意：实际的AI分析调用在MacroAnalyzer中，这里只返回缓存或默认值
+            # 这是一个简化的实现，未来可以优化为直接调用分析器
+            self._macro_status = {
+                'trend': '未知',
+                'btc1d': '未知',
+                'eth1d': '未知',
+                'confidence': 0,
+                'last_update': current_time
+            }
+            self._last_macro_update = current_time
+        
+        return self._macro_status.copy()
