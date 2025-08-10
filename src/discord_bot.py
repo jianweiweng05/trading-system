@@ -215,7 +215,6 @@ async def initialize_bot(bot: commands.Bot, app: FastAPI):
         bot.app = app
         bot.remove_command('help')
         
-        await bot.add_cog(TradingCommands(bot))
         logger.info("✅ 交易系统命令Cog已添加")
 
         logger.info("🚀 正在启动 Discord Bot")
