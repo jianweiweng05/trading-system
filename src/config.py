@@ -17,10 +17,6 @@ class Settings(BaseSettings):
     
     deepseek_api_key: str = Field(..., env="DEEPSEEK_API_KEY")
     
-    leverage: float = Field(default=5.0, env="LEVERAGE")
-    firepower: float = Field(default=0.8, env="FIRESPOWER") # 注意：这里可能是拼写错误，应为 FIREPOWER
-    allocation: str = Field(default="balanced", env="ALLOCATION")
-    
     database_url: str = Field(default="sqlite+aiosqlite:///./data/trading_system_v7.db", env="DATABASE_URL")
     
     discord_alert_webhook: Optional[str] = Field(default=None, env="DISCORD_ALERT_WEBHOOK") # 【修改】默认值改为 None
@@ -47,20 +43,6 @@ class Settings(BaseSettings):
         extra = "allow"
         env_file = ".env"
         env_file_encoding = "utf-8"
-
-    # ... (所有的 @validator 函数保持不变) ...
-    @validator('binance_api_key', 'binance_api_secret', 'discord_token', 
-               'tv_webhook_secret', 'deepseek_api_key')
-    def validate_required_fields(cls, v):
-        if not v:
-            raise ValueError("此字段为必填项")
-        return v
-
-    @validator('leverage')
-    def validate_leverage(cls, v):
-        if not 1 <= v <= 10:
-            raise ValueError("杠杆值必须在1-10之间")
-        return v
 
     @validator('firepower')
     def validate_firepower(cls, v):
