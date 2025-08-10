@@ -26,8 +26,8 @@ from src.alert_system import AlertSystem
 from src.trading_engine import TradingEngine
 # --- 导入 Discord Bot 启动器 ---
 from src.discord_bot import start_discord_bot as run_discord_bot, stop_bot_services
-# --- 【修改】导入数据库函数 ---
-from src.database import get_setting
+# --- 导入数据库函数 ---
+from src.database import get_setting, db_pool # 【修改】将 db_pool 也导入
 
 # --- 日志配置 ---
 logging.basicConfig(
