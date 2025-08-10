@@ -3,12 +3,12 @@ import logging
 import os
 from typing import Optional, List, AsyncGenerator
 from functools import wraps
-
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, MetaData, select, update, func, Text, text
+    Column, Integer, String, Float, DateTime, MetaData, 
+    select, insert, update, delete, func, Text, text # 【修改】补上了 insert, update, delete
 )
 
 logger = logging.getLogger(__name__)
