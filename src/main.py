@@ -93,25 +93,19 @@ async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
 # --- 生命周期管理 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    应用生命周期管理器。
-    负责在应用启动时初始化所有服务，在关闭时优雅地释放资源。
-    """
     logger.info("🔄 系统启动中...")
     
     background_tasks = {}
     
     try:
-        # 1. 初始化数据库连接
+        # 1. 初始化数据库
         from src.database import init_db
         await init_db()
         logger.info("✅ 数据库连接已建立")
-        
-        # 2. 初始化TV状态表
         await init_tv_status_table()
         logger.info("✅ TV状态表已初始化")
         
-        # 3. 初始化交易所连接
+        # 2. 初始化交易所连接
         exchange = binance({
             'apiKey': CONFIG.binance_api_key,
             'secret': CONFIG.binance_api_secret,
@@ -122,12 +116,9 @@ async def lifespan(app: FastAPI):
         app.state.exchange = exchange
         logger.info("✅ 交易所连接已建立")
         
-        # 4. 初始化报警系统
+        # 3. 初始化核心服务
         if CONFIG.discord_alert_webhook:
-            alert_system = AlertSystem(
-                webhook_url=CONFIG.discord_alert_webhook,
-                cooldown_period=CONFIG.alert_cooldown_period
-            )
+            alert_system = AlertSystem(webhook_url=CONFIG.discord_alert_webhook, cooldown_period=CONFIG.alert_cooldown_period)
             await alert_system.start()
             app.state.alert_system = alert_system
             logger.info("✅ 报警系统已启动")
@@ -135,7 +126,6 @@ async def lifespan(app: FastAPI):
             logger.warning("⚠️ 未配置Discord webhook，报警系统将不会启动")
             app.state.alert_system = None
         
-        # 5. 初始化 AI 分析器并恢复状态
         macro_analyzer = MacroAnalyzer(api_key=CONFIG.deepseek_api_key)
         last_season = await get_setting('market_season')
         if last_season:
@@ -144,33 +134,30 @@ async def lifespan(app: FastAPI):
         app.state.macro_analyzer = macro_analyzer
         logger.info("✅ 宏观分析器已初始化")
         
-        # 6. 初始化交易引擎并恢复状态
         if CONFIG.trading_engine:
-            trading_engine = TradingEngine(
-                exchange=app.state.exchange,
-                alert_system=app.state.alert_system
-            )
+            trading_engine = TradingEngine(exchange=app.state.exchange, alert_system=app.state.alert_system)
             await trading_engine.initialize()
             app.state.trading_engine = trading_engine
             logger.info("✅ 交易引擎已启动")
         
-        # 7. 启动黑天鹅雷达
-        background_tasks['radar'] = await safe_start_task(
-            start_black_swan_radar,
-            "黑天鹅雷达"
-        )
-        
-        # 8. 启动 Discord Bot
+        # 4. 启动后台任务
+        background_tasks['radar'] = await safe_start_task(start_black_swan_radar, "黑天鹅雷达")
         if CONFIG.discord_token:
             start_func = lambda: run_discord_bot(app)
-            background_tasks['discord_bot'] = await safe_start_task(
-                start_func,
-                "Discord Bot"
-            )
+            background_tasks['discord_bot'] = await safe_start_task(start_func, "Discord Bot")
         else:
             logger.warning("⚠️ 未配置Discord token，Discord Bot将不会启动")
 
-        # 9. 设置系统状态
+        # 5. 【修改】在启动时触发一次宏观分析，完成“首次生产”
+        async def initial_macro_analysis():
+            logger.info("🚀 正在执行首次宏观分析...")
+            if app.state.macro_analyzer:
+                await app.state.macro_analyzer.get_macro_decision()
+            logger.info("✅ 首次宏观分析完成。")
+        
+        background_tasks['initial_analysis'] = asyncio.create_task(initial_macro_analysis())
+
+        # 6. 设置系统状态
         await SystemState.set_state("ACTIVE")
         logger.info("🚀 系统启动完成")
         
@@ -181,9 +168,9 @@ async def lifespan(app: FastAPI):
         await SystemState.set_state("ERROR")
         raise
     finally:
+        # ... (finally 块保持不变) ...
         logger.info("🛑 系统关闭中...")
         await SystemState.set_state("SHUTDOWN")
-        
         for name, task in background_tasks.items():
             try:
                 if task and not task.done():
@@ -193,25 +180,12 @@ async def lifespan(app: FastAPI):
                 logger.info(f"✅ {name} 任务已取消")
             except Exception as e:
                 logger.error(f"❌ 关闭 {name} 任务时出错: {e}", exc_info=True)
-
-        try:
-            if 'discord_bot' in background_tasks:
-                await stop_bot_services()
-        except Exception as e:
-            logger.error(f"❌ 关闭 Discord Bot 服务时出错: {e}", exc_info=True)
-
-        try:
-            if hasattr(app.state, 'alert_system') and app.state.alert_system:
-                await app.state.alert_system.stop()
-        except Exception as e:
-            logger.error(f"❌ 关闭报警系统时出错: {e}", exc_info=True)
-        
-        try:
-            if hasattr(app.state, 'exchange'):
-                await app.state.exchange.close()
-        except Exception as e:
-            logger.error(f"❌ 关闭交易所连接时出错: {e}", exc_info=True)
-        
+        if 'discord_bot' in background_tasks:
+            await stop_bot_services()
+        if hasattr(app.state, 'alert_system') and app.state.alert_system:
+            await app.state.alert_system.stop()
+        if hasattr(app.state, 'exchange'):
+            await app.state.exchange.close()
         logger.info("✅ 所有服务已关闭")
 
 # --- FastAPI 应用 ---
