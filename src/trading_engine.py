@@ -1,21 +1,14 @@
-# --- 请用这段新代码，完整替换你现有的 trading_engine.py 文件 ---
 
 import logging
 import asyncio
 import time
 from typing import Optional, Dict, Any, List
 from ccxt.async_support import binance
+from sqlalchemy import select, insert, update, delete # 【修改】从 sqlalchemy 直接导入
 from src.config import CONFIG
 from src.alert_system import AlertSystem
-from src.database import (
-    db_pool,
-    ResonanceSignal,
-    select,
-    insert,
-    update,
-    delete
-)
-
+# 【修改】只从我们自己的 database 模块导入我们自己定义的东西
+from src.database import db_pool, ResonanceSignal
 logger = logging.getLogger(__name__)
 
 class TradingEngine:
