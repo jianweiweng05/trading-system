@@ -1,3 +1,4 @@
+# --- 请用这段新代码，替换你文件顶部所有的 import 语句 ---
 
 import logging
 import asyncio
@@ -27,7 +28,7 @@ from src.trading_engine import TradingEngine
 # --- 导入 Discord Bot 启动器 ---
 from src.discord_bot import start_discord_bot as run_discord_bot, stop_bot_services
 # --- 导入数据库函数 ---
-from src.database import get_setting, db_pool
+from src.database import get_setting, db_pool # 【修改】将 db_pool 也导入
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -37,9 +38,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- TV状态数据库操作 ---
+# --- 请用这段新代码，替换你现有的 init_tv_status_table, load_tv_status, save_tv_status 这三个函数 ---
+
+# --- TV状态数据库操作 ---
 async def init_tv_status_table() -> None:
     """初始化TV状态表"""
     try:
+        # 【修改】使用正确的 async with 语法
         async with db_pool.get_session() as session:
             async with session.begin():
                 await session.execute(text('''
@@ -55,6 +60,34 @@ async def init_tv_status_table() -> None:
         logger.error(f"初始化TV状态表失败: {e}")
         raise
 
+async def load_tv_status() -> Dict[str, str]:
+    """从数据库加载TV状态"""
+    status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
+    try:
+        # 【修改】使用正确的 async with 语法
+        async with db_pool.get_session() as session:
+            cursor = await session.execute(text('SELECT symbol, status FROM tv_status'))
+            rows = cursor.fetchall() # fetchall 不是异步的
+            for row in rows:
+                # SQLAlchemy 2.0+ row 是一个 Row 对象，可以通过索引或名称访问
+                status[row[0]] = row[1]
+    except Exception as e:
+        logger.error(f"加载TV状态失败: {e}")
+    return status
+
+async def save_tv_status(symbol: str, status: str) -> None:
+    """保存TV状态到数据库"""
+    try:
+        # 【修改】使用正确的 async with 语法
+        async with db_pool.get_session() as session:
+            async with session.begin():
+                await session.execute(text('''
+                    INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
+                    VALUES (:symbol, :status, :timestamp)
+                '''), {"symbol": symbol, "status": status, "timestamp": time.time()})
+    except Exception as e:
+        logger.error(f"保存TV状态失败: {e}")
+        raise
 async def load_tv_status() -> Dict[str, str]:
     """从数据库加载TV状态"""
     status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
