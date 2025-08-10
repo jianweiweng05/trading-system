@@ -1,4 +1,3 @@
-
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -63,7 +62,8 @@ class MainPanelView(View):
         # 4. 获取共振池状态
         pool_text = "⚪ 未启用"
         if trading_engine:
-            pool_data = trading_engine.get_resonance_pool()
+            # 【修改】增加了 await
+            pool_data = await trading_engine.get_resonance_pool()
             pool_text = f"⏳ {pool_data.get('pending_count', 0)} 个待处理"
         embed.add_field(name="📡 共振池", value=pool_text, inline=True)
 
