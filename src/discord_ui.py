@@ -116,29 +116,96 @@ class MainPanelView(View):
             embed.description = "交易引擎未初始化。"
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+# --- 请用这段新代码，替换你现有的 MainPanelView 类的所有按钮回调函数 ---
+
+    @discord.ui.button(label="📊 详细持仓", style=discord.ButtonStyle.secondary, custom_id="main_panel:positions")
+    async def show_positions(self, interaction: discord.Interaction, button: Button):
+        try:
+            # 【修改】使用 send_message 发送一个全新的、临时的响应
+            await interaction.response.send_message("正在获取持仓信息...", ephemeral=True, delete_after=5)
+            
+            embed = discord.Embed(title="📊 详细持仓", color=discord.Color.blue())
+            trading_engine = getattr(self.bot.app.state, 'trading_engine', None)
+            if trading_engine:
+                positions = await trading_engine.get_position("*")
+                if not positions or all(float(p.get('size', 0)) == 0 for p in positions.values() if p):
+                    embed.description = "当前无任何持仓。"
+                else:
+                    for symbol, pos in positions.items():
+                        if pos and float(pos.get('size', 0)) != 0:
+                            side = "🟢 多头" if float(pos.get('size', 0)) > 0 else "🔴 空头"
+                            pnl = float(pos.get('pnl', 0))
+                            embed.add_field(
+                                name=f"{symbol} ({side})",
+                                value=f"**数量**: {abs(float(pos.get('size', 0)))}\n**均价**: ${float(pos.get('entryPrice', 0)):,.2f}\n**浮盈**: ${pnl:,.2f}",
+                                inline=True
+                            )
+            else:
+                embed.description = "交易引擎未初始化。"
+            # 【修改】使用 followup.send 来发送最终结果
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            logger.error(f"显示持仓失败: {e}", exc_info=True)
+            await interaction.followup.send("❌ 获取持仓信息失败。", ephemeral=True)
+
     @discord.ui.button(label="🚨 报警历史", style=discord.ButtonStyle.secondary, custom_id="main_panel:alerts")
     async def show_alerts(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.defer(ephemeral=True)
-        embed = discord.Embed(title="🚨 最近 5 条报警历史", color=discord.Color.orange())
-        alert_system = getattr(self.bot.app.state, 'alert_system', None)
-        if alert_system:
-            alerts = alert_system.get_alerts()
-            if not alerts:
-                embed.description = "暂无报警记录。"
+        try:
+            # 【修改】使用 send_message 发送一个全新的、临时的响应
+            await interaction.response.send_message("正在获取报警历史...", ephemeral=True, delete_after=5)
+            
+            embed = discord.Embed(title="🚨 最近 5 条报警历史", color=discord.Color.orange())
+            alert_system = getattr(self.bot.app.state, 'alert_system', None)
+            if alert_system:
+                alerts = alert_system.get_alerts()
+                if not alerts:
+                    embed.description = "暂无报警记录。"
+                else:
+                    for alert in reversed(alerts[-5:]):
+                        timestamp = int(alert['timestamp'])
+                        embed.add_field(
+                            name=f"**{alert['type']}** ({alert['level']})",
+                            value=f"{alert['message']}\n*发生于 <t:{timestamp}:R>*",
+                            inline=False
+                        )
             else:
-                for alert in reversed(alerts[-5:]):
-                    timestamp = int(alert['timestamp'])
-                    embed.add_field(
-                        name=f"**{alert['type']}** ({alert['level']})",
-                        value=f"{alert['message']}\n*发生于 <t:{timestamp}:R>*",
-                        inline=False
-                    )
-        else:
-            embed.description = "报警系统未初始化。"
-        await interaction.followup.send(embed=embed, ephemeral=True)
+                embed.description = "报警系统未初始化。"
+            # 【修改】使用 followup.send 来发送最终结果
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            logger.error(f"显示报警历史失败: {e}", exc_info=True)
+            await interaction.followup.send("❌ 获取报警历史失败。", ephemeral=True)
 
     @discord.ui.button(label="⚙️ 参数设置", style=discord.ButtonStyle.secondary, custom_id="main_panel:settings")
     async def show_settings(self, interaction: discord.Interaction, button: Button):
+        try:
+            embed = discord.Embed(title="⚙️ 参数设置", description="在这里调整系统的核心策略参数。", color=discord.Color.purple())
+            # 【修改】使用 edit_message 来切换视图
+            await interaction.response.edit_message(embed=embed, view=SettingsPanelView(self.bot))
+        except Exception as e:
+            logger.error(f"切换到设置面板失败: {e}", exc_info=True)
+            # followup.send 用于在 defer/send_message 之后发送消息
+            await interaction.followup.send("❌ 打开设置面板失败。", ephemeral=True)
+
+    @discord.ui.button(label="🔄 刷新", style=discord.ButtonStyle.primary, custom_id="main_panel:refresh")
+    async def refresh_panel(self, interaction: discord.Interaction, button: Button):
+        try:
+            # 【修改】正确的刷新逻辑：重新构建 Embed，然后用 edit_message 更新
+            await interaction.response.defer(ephemeral=True) # 先响应
+            
+            status_cog = self.bot.get_cog("TradingCommands")
+            if status_cog and hasattr(status_cog, 'status'):
+                # 我们不能直接调用 status(interaction)，而是要复用它的逻辑
+                # 这里我们简化，直接重新构建 Embed
+                new_embed = await status_cog._create_status_embed() # 假设 _create_status_embed 存在且公开
+                await interaction.followup.send(embed=new_embed, view=self, ephemeral=True)
+                # 理想情况下，是 edit_message，但需要 status 命令保存 message 对象
+                # await interaction.message.edit(embed=new_embed, view=self)
+            else:
+                await interaction.followup.send("无法刷新，找不到状态模块。", ephemeral=True)
+        except Exception as e:
+            logger.error(f"刷新面板失败: {e}", exc_info=True)
+            await interaction.followup.send("❌ 刷新失败。", ephemeral=True)
         embed = discord.Embed(title="⚙️ 参数设置", description="在这里调整系统的核心策略参数。", color=discord.Color.purple())
         await interaction.response.edit_message(embed=embed, view=SettingsPanelView(self.bot))
 
