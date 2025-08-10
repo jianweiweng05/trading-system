@@ -75,7 +75,6 @@ class TradingCommands(commands.Cog, name="交易系统"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
     
-    # --- 【修改】get_macro_status 函数的数据库连接逻辑 ---
     async def get_macro_status(self) -> Dict[str, Any]:
         """获取宏观状态信息"""
         current_time = asyncio.get_event_loop().time()
@@ -87,7 +86,6 @@ class TradingCommands(commands.Cog, name="交易系统"):
             logger.info("更新宏观状态缓存...")
             try:
                 from src.database import db_pool
-                # 使用统一的、正确的数据库连接方式
                 async with db_pool.get_session() as session:
                     result = await session.execute(text('SELECT symbol, status FROM tv_status'))
                     rows = result.fetchall()
@@ -116,25 +114,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
         
         return getattr(app_state, '_macro_status', {}).copy()
 
-    async def _create_status_embed(self) -> discord.Embed:
-        """创建一个包含当前系统状态的 Discord Embed 对象"""
-        embed = discord.Embed(
-            title="📊 系统状态",
-            color=discord.Color.green()
-        )
-        embed.add_field(name="运行模式", value=CONFIG.run_mode)
-        embed.add_field(name="Bot状态", value="🟢 在线")
-        embed.add_field(name="延迟", value=f"{round(self.bot.latency * 1000)} ms")
-        
-        macro_status = await self.get_macro_status()
-        macro_text = f"""宏观：{macro_status.get('trend', '未知')}
-BTC1d ({macro_status.get('btc1d', '未知')})
-ETH1d ({macro_status.get('eth1d', '未知')})"""
-        embed.add_field(name="🌍 宏观状态", value=macro_text, inline=False)
-        
-        return embed
-
-    # --- 请用这段新代码，替换你现有的 text_status 和 slash_status 这两个函数 ---
+    # --- 【修改】移除了不必要的 _create_status_embed 和旧的 status 命令 ---
 
     @app_commands.command(name="status", description="显示系统主控制面板")
     async def status(self, interaction: discord.Interaction):
@@ -142,22 +122,18 @@ ETH1d ({macro_status.get('eth1d', '未知')})"""
         try:
             await interaction.response.defer(ephemeral=True)
 
-            # 创建主面板的 Embed
             embed = discord.Embed(title="🎛️ 主控制面板", color=discord.Color.blue())
             embed.description = "使用下方按钮查看详细信息或进行操作。"
             
-            # 异步获取所有需要的数据
             app_state = self.bot.app.state
             trading_engine = getattr(app_state, 'trading_engine', None)
             
-            # 1. 获取宏观状态
             macro_status = await self.get_macro_status()
             macro_text = f"**宏观季节**: {macro_status.get('trend', '未知')}\n"
             macro_text += f"**BTC 1D**: {macro_status.get('btc1d', '未知')}\n"
             macro_text += f"**ETH 1D**: {macro_status.get('eth1d', '未知')}"
             embed.add_field(name="🌍 宏观状态", value=macro_text, inline=True)
 
-            # 2. 获取核心持仓和盈亏
             pnl_text = "无"
             position_text = "无持仓"
             if trading_engine:
@@ -165,7 +141,6 @@ ETH1d ({macro_status.get('eth1d', '未知')})"""
                 if positions:
                     total_pnl = sum(float(p.get('pnl', 0)) for p in positions.values() if p)
                     pnl_text = f"{'🟢' if total_pnl >= 0 else '🔴'} ${total_pnl:,.2f}"
-                    
                     active_positions = [f"{p['symbol']} ({'多' if float(p.get('size',0)) > 0 else '空'})" 
                                         for p in positions.values() if p and float(p.get('size', 0)) != 0]
                     if active_positions:
@@ -174,7 +149,6 @@ ETH1d ({macro_status.get('eth1d', '未知')})"""
             embed.add_field(name="📈 核心持仓", value=position_text, inline=True)
             embed.add_field(name="💰 今日浮盈", value=pnl_text, inline=True)
 
-            # 3. 获取报警状态
             alert_system = getattr(app_state, 'alert_system', None)
             alert_status_text = "⚪ 未启用"
             if alert_system:
@@ -182,7 +156,6 @@ ETH1d ({macro_status.get('eth1d', '未知')})"""
                 alert_status_text = f"{'🔴' if alert_status.get('active') else '🟢'} 正常"
             embed.add_field(name="🚨 报警状态", value=alert_status_text, inline=True)
 
-            # 4. 获取共振池状态
             pool_text = "⚪ 未启用"
             if trading_engine:
                 pool_data = trading_engine.get_resonance_pool()
@@ -192,21 +165,12 @@ ETH1d ({macro_status.get('eth1d', '未知')})"""
             embed.set_footer(text=f"模式: {CONFIG.run_mode.upper()} | 最后刷新于")
             embed.timestamp = discord.utils.utcnow()
 
-            # 导入并使用新的 UI View
             from src.discord_ui import MainPanelView
             await interaction.followup.send(embed=embed, view=MainPanelView(self.bot), ephemeral=True)
 
         except Exception as e:
             logger.error(f"status 命令执行失败: {e}", exc_info=True)
             await interaction.followup.send("❌ 获取主面板失败，请检查日志。", ephemeral=True)
-        """查看系统状态 - 斜杠命令版本"""
-        try:
-            await interaction.response.defer(ephemeral=True)
-            embed = await self._create_status_embed()
-            await interaction.followup.send(embed=embed, ephemeral=True)
-        except Exception as e:
-            logger.error(f"slash status 命令执行失败: {e}")
-            await interaction.followup.send("❌ 获取系统状态失败", ephemeral=True)
 
 # ================= 生命周期管理 =================
 async def initialize_bot(bot: commands.Bot, app: FastAPI):
@@ -215,6 +179,8 @@ async def initialize_bot(bot: commands.Bot, app: FastAPI):
         bot.app = app
         bot.remove_command('help')
         
+        # --- 【修改】确保 TradingCommands Cog 被正确添加 ---
+        await bot.add_cog(TradingCommands(bot))
         logger.info("✅ 交易系统命令Cog已添加")
 
         logger.info("🚀 正在启动 Discord Bot")
