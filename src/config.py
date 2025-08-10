@@ -4,7 +4,6 @@ from typing import Optional
 from pydantic import Field, validator
 from pydantic_settings import BaseSettings
 
-# 【修改】将类名从 Config 改为 Settings，这是 pydantic_settings 的推荐做法
 class Settings(BaseSettings):
     """基础配置类"""
     binance_api_key: str = Field(..., env="BINANCE_API_KEY")
@@ -19,8 +18,8 @@ class Settings(BaseSettings):
     
     database_url: str = Field(default="sqlite+aiosqlite:///./data/trading_system_v7.db", env="DATABASE_URL")
     
-    discord_alert_webhook: Optional[str] = Field(default=None, env="DISCORD_ALERT_WEBHOOK") # 【修改】默认值改为 None
-    discord_report_webhook: Optional[str] = Field(default=None, env="DISCORD_REPORT_WEBHOOK") # 【修改】默认值改为 None
+    discord_alert_webhook: Optional[str] = Field(default=None, env="DISCORD_ALERT_WEBHOOK")
+    discord_report_webhook: Optional[str] = Field(default=None, env="DISCORD_REPORT_WEBHOOK")
 
     alert_order_timeout: int = Field(default=30, env="ALERT_ORDER_TIMEOUT")
     alert_slippage_threshold: float = Field(default=0.5, env="ALERT_SLIPPAGE_THRESHOLD")
@@ -44,19 +43,8 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
 
-    @validator('firepower')
-    def validate_firepower(cls, v):
-        if not 0 < v <= 1:
-            raise ValueError("火力值必须在0-1之间")
-        return v
-
-    @validator('allocation')
-    def validate_allocation(cls, v):
-        allowed_values = {"conservative", "balanced", "aggressive"}
-        if v not in allowed_values:
-            raise ValueError(f"分配模式必须是以下之一: {allowed_values}")
-        return v
-
+    # --- 【修改】移除了与 firepower 和 allocation 相关的验证器 ---
+    
     @validator('alert_order_timeout')
     def validate_alert_order_timeout(cls, v):
         if not 10 <= v <= 300:
@@ -121,7 +109,6 @@ class Settings(BaseSettings):
 # 创建全局配置实例
 CONFIG = Settings()
 
-# --- 【修改】将日志配置和调试代码移到这里，确保在 CONFIG 实例化后执行 ---
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
