@@ -1,4 +1,3 @@
-# --- 请用这段新代码，替换你文件顶部所有的 import 语句 ---
 
 import logging
 import asyncio
@@ -27,8 +26,8 @@ from src.alert_system import AlertSystem
 from src.trading_engine import TradingEngine
 # --- 导入 Discord Bot 启动器 ---
 from src.discord_bot import start_discord_bot as run_discord_bot, stop_bot_services
-# --- 导入数据库函数 ---
-from src.database import get_setting, db_pool # 【修改】将 db_pool 也导入
+# --- 【修改】将所有数据库相关的导入统一放在这里 ---
+from src.database import get_setting, db_pool
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -38,24 +37,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # --- TV状态数据库操作 ---
-# --- 请用这段新代码，替换你现有的 init_tv_status_table, load_tv_status, save_tv_status 这三个函数 ---
-
-# --- TV状态数据库操作 ---
 async def init_tv_status_table() -> None:
     """初始化TV状态表"""
     try:
-        # 【修改】使用正确的 async with 语法
         async with db_pool.get_session() as session:
-            async with session.begin():
-                await session.execute(text('''
-                    CREATE TABLE IF NOT EXISTS tv_status (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        symbol VARCHAR(10) NOT NULL UNIQUE,
-                        status VARCHAR(20) NOT NULL,
-                        timestamp REAL NOT NULL,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                '''))
+            await session.execute(text('''
+                CREATE TABLE IF NOT EXISTS tv_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol VARCHAR(10) NOT NULL UNIQUE,
+                    status VARCHAR(20) NOT NULL,
+                    timestamp REAL NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            '''))
     except Exception as e:
         logger.error(f"初始化TV状态表失败: {e}")
         raise
@@ -64,37 +58,9 @@ async def load_tv_status() -> Dict[str, str]:
     """从数据库加载TV状态"""
     status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
     try:
-        # 【修改】使用正确的 async with 语法
         async with db_pool.get_session() as session:
-            cursor = await session.execute(text('SELECT symbol, status FROM tv_status'))
-            rows = cursor.fetchall() # fetchall 不是异步的
-            for row in rows:
-                # SQLAlchemy 2.0+ row 是一个 Row 对象，可以通过索引或名称访问
-                status[row[0]] = row[1]
-    except Exception as e:
-        logger.error(f"加载TV状态失败: {e}")
-    return status
-
-async def save_tv_status(symbol: str, status: str) -> None:
-    """保存TV状态到数据库"""
-    try:
-        # 【修改】使用正确的 async with 语法
-        async with db_pool.get_session() as session:
-            async with session.begin():
-                await session.execute(text('''
-                    INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
-                    VALUES (:symbol, :status, :timestamp)
-                '''), {"symbol": symbol, "status": status, "timestamp": time.time()})
-    except Exception as e:
-        logger.error(f"保存TV状态失败: {e}")
-        raise
-async def load_tv_status() -> Dict[str, str]:
-    """从数据库加载TV状态"""
-    status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
-    try:
-        async with db_pool.get_session() as session:
-            cursor = await session.execute(text('SELECT symbol, status FROM tv_status'))
-            rows = cursor.fetchall()
+            result = await session.execute(text('SELECT symbol, status FROM tv_status'))
+            rows = result.fetchall()
             for row in rows:
                 status[row[0]] = row[1]
     except Exception as e:
@@ -105,11 +71,10 @@ async def save_tv_status(symbol: str, status: str) -> None:
     """保存TV状态到数据库"""
     try:
         async with db_pool.get_session() as session:
-            async with session.begin():
-                await session.execute(text('''
-                    INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
-                    VALUES (:symbol, :status, :timestamp)
-                '''), {"symbol": symbol, "status": status, "timestamp": time.time()})
+            await session.execute(text('''
+                INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
+                VALUES (:symbol, :status, :timestamp)
+            '''), {"symbol": symbol, "status": status, "timestamp": time.time()})
     except Exception as e:
         logger.error(f"保存TV状态失败: {e}")
         raise
@@ -125,7 +90,7 @@ async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
         logger.error(f"❌ {name} 启动任务失败: {e}", exc_info=True)
         return None
 
-# --- 【修改】生命周期管理，增加状态恢复逻辑 ---
+# --- 生命周期管理 ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -185,7 +150,7 @@ async def lifespan(app: FastAPI):
                 exchange=app.state.exchange,
                 alert_system=app.state.alert_system
             )
-            await trading_engine.initialize() # 调用 initialize 来恢复共振池
+            await trading_engine.initialize()
             app.state.trading_engine = trading_engine
             logger.info("✅ 交易引擎已启动")
         
