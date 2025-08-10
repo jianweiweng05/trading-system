@@ -81,7 +81,7 @@ class MacroAnalyzer:
                     f"宏观季节由 {self.last_known_season} 转为 BEAR. "
                     f"触发指令：清算所有多头仓位。"
                 )
-     
+   
         # 4. 更新"状态记忆"
         self.last_known_season = current_season
         
