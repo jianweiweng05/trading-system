@@ -314,13 +314,13 @@ class QuickActionsView(View):
             status_text = f"🟢 状态: 运行中 | ⚙️ 模式: {'模拟' if CONFIG.run_mode == 'simulate' else '实盘'}"
             embed.add_field(name="系统状态", value=status_text, inline=False)
             
-            # 【修改】使用正确的状态访问方式
             trading_engine = getattr(self.bot.app.state, 'trading_engine', None)
             
             macro_status, btc_status, eth_status = "未知", "未知", "未知"
             if trading_engine and hasattr(trading_engine, 'get_macro_status'):
                 try:
-                    macro_data = await trading_engine.get_macro_status()
+                    # 【修改】移除了 await，因为 get_macro_status 现在是普通函数
+                    macro_data = trading_engine.get_macro_status()
                     macro_status = macro_data.get('trend', '未知')
                     btc_status = macro_data.get('btc1d', '未知')
                     eth_status = macro_data.get('eth1d', '未知')
@@ -335,7 +335,8 @@ class QuickActionsView(View):
             signal_count, signal_status = 0, "无待处理信号"
             if trading_engine and hasattr(trading_engine, 'get_resonance_pool'):
                 try:
-                    pool_data = await trading_engine.get_resonance_pool()
+                    # 【修改】移除了 await，因为 get_resonance_pool 现在是普通函数
+                    pool_data = trading_engine.get_resonance_pool()
                     signal_count = len(pool_data.get('signals', []))
                     if signal_count > 0:
                         signal_status = f"有 {signal_count} 个待处理信号"
@@ -350,6 +351,7 @@ class QuickActionsView(View):
             pnl_text, position_text = "🟢 $0.00", "无持仓"
             if trading_engine:
                 try:
+                    # get_position 是异步的，所以这里保留 await
                     positions = await trading_engine.get_position("*")
                     if positions:
                         total_pnl, position_lines = 0.0, []
@@ -371,7 +373,6 @@ class QuickActionsView(View):
             embed.add_field(name="📈 持仓/浮盈", value=pnl_text, inline=False)
             embed.add_field(name="持仓状态", value=position_text, inline=False)
             
-            # 【修改】使用正确的状态访问方式
             alert_system = getattr(self.bot.app.state, 'alert_system', None)
             if alert_system:
                 alert_status = alert_system.get_status()
