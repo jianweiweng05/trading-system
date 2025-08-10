@@ -75,28 +75,34 @@ class ResonanceSignal(Base):
     status = Column(String, nullable=False, default='pending', index=True)
     created_at = Column(DateTime, default=func.now())
 
+from contextlib import asynccontextmanager # 【修改】导入 asynccontextmanager
+
 class DatabaseConnectionPool:
     def __init__(self, engine: AsyncEngine):
         self.engine = engine
         self.session_factory = sessionmaker(
             engine,
             class_=AsyncSession,
-            expire_on_commit=False,
-            autocommit=False
+            expire_on_commit=False
         )
     
+    @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """获取数据库会话的上下文管理器"""
-        async with self.session_factory() as session:
-            try:
-                yield session
-            except Exception:
-                await session.rollback()
-                raise
-            finally:
-                await session.close()
+        """
+        提供一个可以直接与 async with 使用的、安全的数据库会话。
+        它会自动处理事务的提交、回滚和关闭。
+        """
+        session: AsyncSession = self.session_factory()
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
     
-    async def get_simple_session(self) -> AsyncSession:
+    # 【修改】移除了容易引起混淆的 get_simple_session 方法
         """获取一个简单的、需要手动管理的数据库会话"""
         return self.session_factory()
 
