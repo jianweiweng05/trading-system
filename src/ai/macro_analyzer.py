@@ -84,16 +84,17 @@ class MacroAnalyzer:
    
         # 4. 更新"状态记忆"
         self.last_known_season = current_season
-        
+
         # 5. 更新详细状态缓存
+        current_timestamp = ai_analysis.get('timestamp', time.time()) # 【修改】获取时间戳，如果不存在则使用当前时间
         self._detailed_status = {
             'trend': '牛' if current_season == 'BULL' else '熊' if current_season == 'BEAR' else '震荡',
             'btc1d': ai_analysis.get('btc_trend', '中性'),
             'eth1d': ai_analysis.get('eth_trend', '中性'),
             'confidence': ai_analysis.get('confidence', 0),
-            'last_update': ai_analysis.get('timestamp')
+            'last_update': current_timestamp
         }
-        self._last_status_update = ai_analysis.get('timestamp', 0)
+        self._last_status_update = current_timestamp # 【修改】使用获取到的、保证有效的时间戳
         
         # 6. 【修改】将最新的宏观季节持久化到数据库
         try:
