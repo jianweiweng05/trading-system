@@ -1,3 +1,5 @@
+# --- 请用这段新代码，完整替换你现有的 ai_client.py 文件 ---
+
 import logging
 from typing import Dict, Any, Optional
 import httpx
@@ -22,9 +24,10 @@ class AIClient:
 ---
 **情报输入**
 ---
-- **价格趋势情报:** {data['price_trend_summary']}
-- **链上根基情报:** {data['onchain_summary']}
-- **资金燃料情报:** {data['funding_summary']}
+- **价格趋势情报:** {data.get('price_trend_summary', '未知')}
+- **链上根基情报:** {data.get('onchain_summary', '未知')}
+- **资金燃料情报:** {data.get('funding_summary', '未知')}
+- **当前信号:** {data.get('current_signals', '无')}
 
 ---
 **你的分析与决策流程**
@@ -45,6 +48,7 @@ class AIClient:
         
         try:
             async with httpx.AsyncClient() as client:
+                # --- 【修改】在这里增加了 timeout=60.0 参数 ---
                 response = await client.post(
                     f"{self.base_url}/chat/completions",
                     headers={
@@ -55,24 +59,27 @@ class AIClient:
                         "model": "deepseek-chat",
                         "messages": [{"role": "user", "content": prompt}],
                         "temperature": 0.7
-                    }
+                    },
+                    timeout=60.0 # 将超时时间设置为60秒
                 )
                 response.raise_for_status()
                 result = response.json()
                 content = result["choices"][0]["message"]["content"]
                 
-                # 解析返回的JSON内容
                 parsed_result = json.loads(content)
                 
-                # 转换为系统需要的格式
                 return {
-                    "market_season": "BULL" if parsed_result["bull_bear_status"] == "牛市" else 
-                                   "BEAR" if parsed_result["bull_bear_status"] == "熊市" else 
+                    "market_season": "BULL" if parsed_result.get("bull_bear_status") == "牛市" else 
+                                   "BEAR" if parsed_result.get("bull_bear_status") == "熊市" else 
                                    "NEUTRAL",
-                    "confidence": parsed_result["composite_index"],
-                    "reason": parsed_result["reasoning"],
-                    "status_changed": parsed_result["status_changed"]
+                    "confidence": parsed_result.get("composite_index", 0),
+                    "reason": parsed_result.get("reasoning", "无"),
+                    "status_changed": parsed_result.get("status_changed", False),
+                    "timestamp": time.time() # 【新增】返回分析完成时的时间戳
                 }
+        except httpx.ReadTimeout:
+            logger.error("AI 分析失败: 请求 DeepSeek API 超时。")
+            return None
         except Exception as e:
             logger.error(f"AI分析失败: {e}", exc_info=True)
             return None
