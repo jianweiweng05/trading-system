@@ -1,4 +1,3 @@
-# --- 请用这段新代码，完整替换你现有的 macro_analyzer.py 文件 ---
 
 import logging
 import time # 【修改】添加缺失的导入
