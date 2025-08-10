@@ -134,18 +134,71 @@ ETH1d ({macro_status.get('eth1d', '未知')})"""
         
         return embed
 
-    @commands.command(name="status", help="查看系统状态")
-    async def text_status(self, ctx: commands.Context):
-        """查看系统状态 - 文本命令版本"""
-        try:
-            embed = await self._create_status_embed()
-            await ctx.send(embed=embed)
-        except Exception as e:
-            logger.error(f"status 命令执行失败: {e}")
-            await ctx.send("❌ 获取系统状态失败", ephemeral=True)
+    # --- 请用这段新代码，替换你现有的 text_status 和 slash_status 这两个函数 ---
 
-    @app_commands.command(name="status", description="查看系统状态")
-    async def slash_status(self, interaction: discord.Interaction):
+    @app_commands.command(name="status", description="显示系统主控制面板")
+    async def status(self, interaction: discord.Interaction):
+        """显示统一的、交互式的主控制面板"""
+        try:
+            await interaction.response.defer(ephemeral=True)
+
+            # 创建主面板的 Embed
+            embed = discord.Embed(title="🎛️ 主控制面板", color=discord.Color.blue())
+            embed.description = "使用下方按钮查看详细信息或进行操作。"
+            
+            # 异步获取所有需要的数据
+            app_state = self.bot.app.state
+            trading_engine = getattr(app_state, 'trading_engine', None)
+            
+            # 1. 获取宏观状态
+            macro_status = await self.get_macro_status()
+            macro_text = f"**宏观季节**: {macro_status.get('trend', '未知')}\n"
+            macro_text += f"**BTC 1D**: {macro_status.get('btc1d', '未知')}\n"
+            macro_text += f"**ETH 1D**: {macro_status.get('eth1d', '未知')}"
+            embed.add_field(name="🌍 宏观状态", value=macro_text, inline=True)
+
+            # 2. 获取核心持仓和盈亏
+            pnl_text = "无"
+            position_text = "无持仓"
+            if trading_engine:
+                positions = await trading_engine.get_position("*")
+                if positions:
+                    total_pnl = sum(float(p.get('pnl', 0)) for p in positions.values() if p)
+                    pnl_text = f"{'🟢' if total_pnl >= 0 else '🔴'} ${total_pnl:,.2f}"
+                    
+                    active_positions = [f"{p['symbol']} ({'多' if float(p.get('size',0)) > 0 else '空'})" 
+                                        for p in positions.values() if p and float(p.get('size', 0)) != 0]
+                    if active_positions:
+                        position_text = ", ".join(active_positions)
+
+            embed.add_field(name="📈 核心持仓", value=position_text, inline=True)
+            embed.add_field(name="💰 今日浮盈", value=pnl_text, inline=True)
+
+            # 3. 获取报警状态
+            alert_system = getattr(app_state, 'alert_system', None)
+            alert_status_text = "⚪ 未启用"
+            if alert_system:
+                alert_status = alert_system.get_status()
+                alert_status_text = f"{'🔴' if alert_status.get('active') else '🟢'} 正常"
+            embed.add_field(name="🚨 报警状态", value=alert_status_text, inline=True)
+
+            # 4. 获取共振池状态
+            pool_text = "⚪ 未启用"
+            if trading_engine:
+                pool_data = trading_engine.get_resonance_pool()
+                pool_text = f"⏳ {pool_data.get('pending_count', 0)} 个待处理"
+            embed.add_field(name="📡 共振池", value=pool_text, inline=True)
+
+            embed.set_footer(text=f"模式: {CONFIG.run_mode.upper()} | 最后刷新于")
+            embed.timestamp = discord.utils.utcnow()
+
+            # 导入并使用新的 UI View
+            from src.discord_ui import MainPanelView
+            await interaction.followup.send(embed=embed, view=MainPanelView(self.bot), ephemeral=True)
+
+        except Exception as e:
+            logger.error(f"status 命令执行失败: {e}", exc_info=True)
+            await interaction.followup.send("❌ 获取主面板失败，请检查日志。", ephemeral=True)
         """查看系统状态 - 斜杠命令版本"""
         try:
             await interaction.response.defer(ephemeral=True)
