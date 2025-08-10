@@ -27,7 +27,7 @@ from src.trading_engine import TradingEngine
 # --- 导入 Discord Bot 启动器 ---
 from src.discord_bot import start_discord_bot as run_discord_bot, stop_bot_services
 # --- 导入数据库函数 ---
-from src.database import get_setting, db_pool # 【修改】将 db_pool 也导入
+from src.database import get_setting, db_pool
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -36,14 +36,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- TV状态数据库操作 (保持不变) ---
-# --- 请用这段新代码，替换你现有的 init_tv_status_table, load_tv_status, save_tv_status 这三个函数 ---
-
 # --- TV状态数据库操作 ---
 async def init_tv_status_table() -> None:
     """初始化TV状态表"""
     try:
-        # 【修改】使用正确的 async with 语法
         async with db_pool.get_session() as session:
             async with session.begin():
                 await session.execute(text('''
@@ -63,12 +59,10 @@ async def load_tv_status() -> Dict[str, str]:
     """从数据库加载TV状态"""
     status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
     try:
-        # 【修改】使用正确的 async with 语法
         async with db_pool.get_session() as session:
             cursor = await session.execute(text('SELECT symbol, status FROM tv_status'))
-            rows = cursor.fetchall() # fetchall 不是异步的
+            rows = cursor.fetchall()
             for row in rows:
-                # SQLAlchemy 2.0+ row 是一个 Row 对象，可以通过索引或名称访问
                 status[row[0]] = row[1]
     except Exception as e:
         logger.error(f"加载TV状态失败: {e}")
@@ -77,7 +71,6 @@ async def load_tv_status() -> Dict[str, str]:
 async def save_tv_status(symbol: str, status: str) -> None:
     """保存TV状态到数据库"""
     try:
-        # 【修改】使用正确的 async with 语法
         async with db_pool.get_session() as session:
             async with session.begin():
                 await session.execute(text('''
@@ -87,47 +80,8 @@ async def save_tv_status(symbol: str, status: str) -> None:
     except Exception as e:
         logger.error(f"保存TV状态失败: {e}")
         raise
-    finally:
-        if conn:
-            await conn.close()
 
-async def load_tv_status() -> Dict[str, str]:
-    """从数据库加载TV状态"""
-    status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
-    conn = None
-    try:
-        from src.database import db_pool
-        conn = await db_pool.get_simple_session()
-        cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
-        rows = await cursor.fetchall()
-        for row in rows:
-            status[row['symbol']] = row['status']
-    except Exception as e:
-        logger.error(f"加载TV状态失败: {e}")
-    finally:
-        if conn:
-            await conn.close()
-    return status
-
-async def save_tv_status(symbol: str, status: str) -> None:
-    """保存TV状态到数据库"""
-    conn = None
-    try:
-        from src.database import db_pool
-        conn = await db_pool.get_simple_session()
-        await conn.execute(text('''
-            INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
-            VALUES (?, ?, ?)
-        '''), (symbol, status, time.time()))
-        await conn.commit()
-    except Exception as e:
-        logger.error(f"保存TV状态失败: {e}")
-        raise
-    finally:
-        if conn:
-            await conn.close()
-
-# --- 安全启动任务包装函数 (保持不变) ---
+# --- 安全启动任务包装函数 ---
 async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
     """安全启动任务的包装函数"""
     try:
@@ -185,7 +139,6 @@ async def lifespan(app: FastAPI):
         
         # 5. 初始化 AI 分析器并恢复状态
         macro_analyzer = MacroAnalyzer(api_key=CONFIG.deepseek_api_key)
-        # 从数据库恢复上一次的宏观状态
         last_season = await get_setting('market_season')
         if last_season:
             macro_analyzer.last_known_season = last_season
@@ -199,8 +152,7 @@ async def lifespan(app: FastAPI):
                 exchange=app.state.exchange,
                 alert_system=app.state.alert_system
             )
-            # 从数据库恢复共振池状态
-            await trading_engine.initialize()
+            await trading_engine.initialize() # 调用 initialize 来恢复共振池
             app.state.trading_engine = trading_engine
             logger.info("✅ 交易引擎已启动")
         
@@ -231,7 +183,6 @@ async def lifespan(app: FastAPI):
         await SystemState.set_state("ERROR")
         raise
     finally:
-        # ... (finally 块保持不变) ...
         logger.info("🛑 系统关闭中...")
         await SystemState.set_state("SHUTDOWN")
         
@@ -273,7 +224,7 @@ app = FastAPI(
     debug=False
 )
 
-# --- 路由定义 (保持不变) ---
+# --- 路由定义 ---
 @app.get("/")
 async def root() -> Dict[str, Any]:
     return {
@@ -306,7 +257,7 @@ async def health_check(request: Request) -> Dict[str, Any]:
         except Exception:
             checks["exchange"] = False
             
-    if hasattr(app_state, 'alert_system') and app.state.alert_system:
+    if hasattr(app_state, 'alert_system') and app_state.alert_system:
         checks["alert_system"] = app_state.alert_system.is_running
     
     if hasattr(app_state, 'trading_engine') and app_state.trading_engine:
@@ -354,7 +305,7 @@ async def get_tv_status():
         logger.error(f"获取TV状态失败: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
-# --- 主函数 (保持不变) ---
+# --- 主函数 ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     logger.info(f"启动服务器，端口: {port}")
