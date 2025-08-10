@@ -217,11 +217,7 @@ async def initialize_bot(bot: commands.Bot, app: FastAPI):
         
         await bot.add_cog(TradingCommands(bot))
         logger.info("✅ 交易系统命令Cog已添加")
-        
-        from src.discord_ui import TradingDashboard
-        await bot.add_cog(TradingDashboard(bot))
-        logger.info("✅ 交易面板Cog已添加")
-        
+
         logger.info("🚀 正在启动 Discord Bot")
         await bot.start(CONFIG.discord_token)
     except Exception as e:
