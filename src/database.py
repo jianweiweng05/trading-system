@@ -1,3 +1,4 @@
+
 import logging
 import os
 from typing import Optional, List, AsyncGenerator, Union
@@ -15,13 +16,10 @@ logger = logging.getLogger(__name__)
 
 def get_db_paths() -> str:
     """获取安全的数据库路径"""
-    # 在Render平台使用disk挂载路径，在本地使用项目目录
     if "RENDER" in os.environ:
-        # Render的disk挂载路径
         base_path = "/opt/render/project/persistent"
         logger.info(f"检测到Render环境，使用disk挂载路径: {base_path}")
     else:
-        # 本地环境使用项目目录
         base_path = os.path.join(os.getcwd(), "data")
         logger.info(f"本地环境，使用项目目录: {base_path}")
     
@@ -47,11 +45,9 @@ def create_engine_with_pool(database_url: str) -> AsyncEngine:
 DATABASE_URL = f"sqlite+aiosqlite:///{get_db_paths()}"
 logger.info(f"数据库路径: {DATABASE_URL}")
 
-# 异步引擎用于业务操作
 engine = create_engine_with_pool(DATABASE_URL)
 metadata = MetaData()
 
-# 创建 Base 类时绑定 metadata
 Base = declarative_base(metadata=metadata)
 
 class Trade(Base):
@@ -73,6 +69,19 @@ class Setting(Base):
     
     key = Column(String, primary_key=True)
     value = Column(Text)
+
+# --- 【修改】新增 ResonanceSignal 表的定义 ---
+class ResonanceSignal(Base):
+    __tablename__ = 'resonance_signals'
+
+    id = Column(String, primary_key=True) # 信号ID，例如 'BTC_1h_BUY'
+    symbol = Column(String, nullable=False, index=True)
+    timeframe = Column(String, nullable=False)
+    side = Column(String, nullable=False) # 'BUY' or 'SELL'
+    strength = Column(Float, nullable=False)
+    timestamp = Column(Float, nullable=False, index=True)
+    status = Column(String, nullable=False, default='pending', index=True) # 'pending', 'triggered', 'expired'
+    created_at = Column(DateTime, default=func.now())
 
 def with_transaction(func):
     """事务装饰器"""
@@ -96,7 +105,7 @@ class DatabaseConnectionPool:
             engine,
             class_=AsyncSession,
             expire_on_commit=False,
-            autocommit=False  # 【修改】添加 autocommit=False 参数
+            autocommit=False
         )
     
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
@@ -111,19 +120,17 @@ class DatabaseConnectionPool:
             finally:
                 await session.close()
     
-    async def get_simple_session(self) -> AsyncSession:  # 【修改】改为异步方法
+    async def get_simple_session(self) -> AsyncSession:
         """获取简单的数据库会话"""
         session = self.session_factory()
-        await session.begin()  # 【修改】显式开启事务
+        await session.begin()
         return session
 
 async def init_db() -> None:
     """初始化数据库"""
     try:
         logger.info("正在创建数据库表...")
-        # 使用 Python 内置的 sqlite3 模块 + SQLAlchemy 最新稳定版
         from sqlalchemy import create_engine
-        # 直接使用内置 sqlite3，无需额外驱动
         sync_engine = create_engine("sqlite:///" + get_db_paths())
         Base.metadata.create_all(sync_engine)
         logger.info("✅ 数据库表创建完成")
@@ -164,7 +171,6 @@ async def set_setting(key: str, value: str) -> None:
     """设置设置项"""
     try:
         async with engine.connect() as conn:
-            # 使用 ORM 模型进行查询和更新
             check_stmt = select(Setting).where(Setting.key == key)
             result = await conn.execute(check_stmt)
             
@@ -201,7 +207,6 @@ async def log_trade(symbol: str, quantity: float, entry_price: float,
     """记录交易"""
     try:
         async with engine.connect() as conn:
-            # 使用 ORM 模型创建新记录
             new_trade = Trade(
                 symbol=symbol,
                 quantity=quantity,
@@ -223,7 +228,6 @@ async def close_trade(trade_id: int, exit_price: float) -> bool:
     """平仓"""
     try:
         async with engine.connect() as conn:
-            # 使用 ORM 模型进行更新
             update_stmt = update(Trade).where(Trade.id == trade_id).values(
                 status='CLOSED',
                 exit_price=exit_price,
@@ -284,5 +288,4 @@ async def get_db_connection() -> AsyncGenerator[AsyncSession, None]:
     async with db_pool.get_session() as session:
         yield session
 
-# 创建全局连接池实例
 db_pool = DatabaseConnectionPool(engine)
