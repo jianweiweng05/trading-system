@@ -74,8 +74,8 @@ class ResonanceSignal(Base):
     timestamp = Column(Float, nullable=False, index=True)
     status = Column(String, nullable=False, default='pending', index=True)
     created_at = Column(DateTime, default=func.now())
-
-from contextlib import asynccontextmanager # 【修改】导入 asynccontextmanager
+    
+from contextlib import asynccontextmanager # 确保这个导入在文件顶部
 
 class DatabaseConnectionPool:
     def __init__(self, engine: AsyncEngine):
@@ -101,10 +101,6 @@ class DatabaseConnectionPool:
             raise
         finally:
             await session.close()
-    
-    # 【修改】移除了容易引起混淆的 get_simple_session 方法
-        """获取一个简单的、需要手动管理的数据库会话"""
-        return self.session_factory()
 
 db_pool = DatabaseConnectionPool(engine)
 
