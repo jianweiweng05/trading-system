@@ -48,10 +48,11 @@ def load_strategy_data(filename: str) -> Optional[pd.DataFrame]:
     try:
         # 根据文件扩展名，选择不同的读取方式
         if filename.endswith('.xlsx'):
-            # 使用 openpyxl 引擎读取 Excel 文件
-            df = pd.read_excel(file_path, engine='openpyxl')
+            # 【修改】添加 header=None，告诉 pandas 文件没有表头行
+            df = pd.read_excel(file_path, engine='openpyxl', header=None)
         elif filename.endswith('.csv'):
-            df = pd.read_csv(file_path)
+            # 【修改】为 csv 读取也加上 header=None
+            df = pd.read_csv(file_path, header=None)
         else:
             logger.error(f"不支持的文件格式: {filename}。只支持 .xlsx 和 .csv。")
             return None
