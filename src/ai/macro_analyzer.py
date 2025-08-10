@@ -1,10 +1,12 @@
+# --- 请用这段新代码，完整替换你现有的 macro_analyzer.py 文件 ---
 
 import logging
 import time
 from typing import Dict, Any, Optional
 from .ai_client import AIClient
-# --- 【修改】导入我们新的“图书管理员” ---
 from src.data_loader import load_strategy_data
+# --- 【修改】导入数据库相关的工具 ---
+from src.database import db_pool, text
 
 logger = logging.getLogger(__name__)
 
@@ -17,50 +19,46 @@ class MacroAnalyzer:
         self._detailed_status: Optional[Dict[str, Any]] = None
         self._last_status_update: float = 0
     
+    # --- 【修改】get_macro_data 函数现在会加载历史数据和实时TV信号 ---
     async def get_macro_data(self) -> Dict[str, str]:
-        """获取宏观分析数据，现在会批量加载并整合所有策略的历史数据"""
+        """获取宏观分析数据，现在会结合历史数据和最新的TV信号"""
         
-        # 1. 定义你的策略文件“书单”
+        # 1. 加载静态的历史数据总结
         strategy_files = [
-            "BTC1d.xlsx",
-            "BTC10h.xlsx",
-            "ETH1d多.xlsx",
-            "ETH1d空.xlsx",
-            "ETH4h.xlsx",
-            "AVAX9h.xlsx",
-            "SOL10h.xlsx",
-            "ADA4h.xlsx"
+            "BTC1d.xlsx", "BTC10h.xlsx", "ETH1d多.xlsx", "ETH1d空.xlsx",
+            "ETH4h.xlsx", "AVAX9h.xlsx", "SOL10h.xlsx", "ADA4h.xlsx"
         ]
-        
-        # 2. 准备一个容器来存放所有策略的摘要信息
         all_summaries = []
+        SUMMARY_COLUMN_NAME = "策略总结" # <--- 请确保这个列名与你的 Excel 文件一致
 
-        # 3. 循环加载并处理每一本书（策略文件）
         for filename in strategy_files:
             strategy_df = load_strategy_data(filename)
-            
-            if strategy_df is not None and not strategy_df.empty:
-                # 假设每个 Excel 文件都有一个名为 'summary' 的列，
-                # 并且第一行包含了对这个策略回测结果的文字总结。
-                # 你需要根据你 Excel 的实际结构来修改这里的 'summary'。
-                if 'summary' in strategy_df.columns:
-                    summary_text = strategy_df['summary'].iloc[0]
-                    # 我们在摘要前加上文件名，方便 AI 理解上下文
-                    all_summaries.append(f"策略 {filename} 的回测总结: {summary_text}")
-                else:
-                    logger.warning(f"在文件 {filename} 中找不到 'summary' 列，已跳过。")
+            if strategy_df is not None and SUMMARY_COLUMN_NAME in strategy_df.columns:
+                summary_text = strategy_df[SUMMARY_COLUMN_NAME].iloc[0]
+                all_summaries.append(f"策略 {filename} 的回测总结: {summary_text}")
+            else:
+                logger.warning(f"在文件 {filename} 中找不到 '{SUMMARY_COLUMN_NAME}' 列，已跳过。")
         
-        # 4. 将所有摘要信息整合成一个大的段落
-        # 用换行符将每个策略的总结分开
-        combined_summary = "\n".join(all_summaries)
+        combined_summary = "\n".join(all_summaries) if all_summaries else "未能加载任何策略的历史数据。"
 
-        # 5. 返回整合后的分析材料
-        # 我们将所有策略的总结都放在 price_trend_summary 里，
-        # 让 AI 对所有策略的表现进行一次综合评估。
+        # 2. 加载最新的、持久化的 TV 日线信号
+        tv_status_summary = "TV 日线信号未知。"
+        try:
+            async with db_pool.get_session() as session:
+                result = await session.execute(text('SELECT symbol, status FROM tv_status'))
+                rows = result.fetchall()
+                if rows:
+                    status_texts = [f"{row[0].upper()} 的当前 1D 信号是 {row[1]}" for row in rows]
+                    tv_status_summary = " ".join(status_texts)
+        except Exception as e:
+            logger.error(f"在宏观分析中加载TV状态失败: {e}")
+
+        # 3. 将所有信息整合后返回
         return {
-            "price_trend_summary": combined_summary if combined_summary else "未能加载任何策略的历史数据。",
-            "onchain_summary": "链上数据分析待实现。", # 其他字段暂时保持不变
-            "funding_summary": "资金费率分析待实现。"
+            "price_trend_summary": combined_summary,
+            "onchain_summary": "链上数据分析待实现。",
+            "funding_summary": "资金费率分析待实现。",
+            "current_signals": tv_status_summary # 新增字段，专门给AI看当前信号
         }
     
     async def analyze_market_status(self) -> Optional[Dict[str, Any]]:
