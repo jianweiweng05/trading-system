@@ -1,15 +1,14 @@
 
 import logging
 import os
-from typing import Optional, List, AsyncGenerator, Union
-from datetime import datetime
+from typing import Optional, List, AsyncGenerator
 from functools import wraps
 
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, AsyncEngine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, MetaData, insert, select, update, func, Text, text
+    Column, Integer, String, Float, DateTime, MetaData, select, update, func, Text, text
 )
 
 logger = logging.getLogger(__name__)
@@ -37,10 +36,7 @@ def get_db_paths() -> str:
 
 def create_engine_with_pool(database_url: str) -> AsyncEngine:
     """创建带连接池的引擎"""
-    return create_async_engine(
-        database_url,
-        echo=False
-    )
+    return create_async_engine(database_url, echo=False)
 
 DATABASE_URL = f"sqlite+aiosqlite:///{get_db_paths()}"
 logger.info(f"数据库路径: {DATABASE_URL}")
@@ -52,7 +48,6 @@ Base = declarative_base(metadata=metadata)
 
 class Trade(Base):
     __tablename__ = 'trades'
-    
     id = Column(Integer, primary_key=True)
     symbol = Column(String, nullable=False, index=True)
     quantity = Column(Float, nullable=False)
@@ -66,37 +61,19 @@ class Trade(Base):
 
 class Setting(Base):
     __tablename__ = 'settings'
-    
     key = Column(String, primary_key=True)
     value = Column(Text)
 
-# --- 【修改】新增 ResonanceSignal 表的定义 ---
 class ResonanceSignal(Base):
     __tablename__ = 'resonance_signals'
-
-    id = Column(String, primary_key=True) # 信号ID，例如 'BTC_1h_BUY'
+    id = Column(String, primary_key=True)
     symbol = Column(String, nullable=False, index=True)
     timeframe = Column(String, nullable=False)
-    side = Column(String, nullable=False) # 'BUY' or 'SELL'
+    side = Column(String, nullable=False)
     strength = Column(Float, nullable=False)
     timestamp = Column(Float, nullable=False, index=True)
-    status = Column(String, nullable=False, default='pending', index=True) # 'pending', 'triggered', 'expired'
+    status = Column(String, nullable=False, default='pending', index=True)
     created_at = Column(DateTime, default=func.now())
-
-def with_transaction(func):
-    """事务装饰器"""
-    @wraps(func)
-    async def wrapper(*args, **kwargs):
-        async with db_pool.get_session() as session:
-            try:
-                result = await func(session, *args, **kwargs)
-                await session.commit()
-                return result
-            except Exception as e:
-                await session.rollback()
-                logger.error(f"事务执行失败: {str(e)}", exc_info=True)
-                raise
-    return wrapper
 
 class DatabaseConnectionPool:
     def __init__(self, engine: AsyncEngine):
@@ -109,30 +86,43 @@ class DatabaseConnectionPool:
         )
     
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """获取数据库会话"""
+        """获取数据库会话的上下文管理器"""
         async with self.session_factory() as session:
             try:
                 yield session
-            except Exception as e:
+            except Exception:
                 await session.rollback()
-                logger.error(f"数据库会话错误: {str(e)}", exc_info=True)
                 raise
             finally:
                 await session.close()
     
     async def get_simple_session(self) -> AsyncSession:
-        """获取简单的数据库会话"""
-        session = self.session_factory()
-        await session.begin()
-        return session
+        """获取一个简单的、需要手动管理的数据库会话"""
+        return self.session_factory()
+
+db_pool = DatabaseConnectionPool(engine)
+
+def with_transaction(func):
+    """事务装饰器"""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        async with db_pool.get_session() as session:
+            try:
+                result = await func(session, *args, **kwargs)
+                await session.commit()
+                return result
+            except Exception as e:
+                # 回滚已在 get_session 中处理
+                logger.error(f"事务执行失败: {str(e)}", exc_info=True)
+                raise
+    return wrapper
 
 async def init_db() -> None:
     """初始化数据库"""
     try:
         logger.info("正在创建数据库表...")
-        from sqlalchemy import create_engine
-        sync_engine = create_engine("sqlite:///" + get_db_paths())
-        Base.metadata.create_all(sync_engine)
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
         logger.info("✅ 数据库表创建完成")
     except Exception as e:
         logger.error(f"❌ 数据库初始化失败: {str(e)}", exc_info=True)
@@ -141,25 +131,25 @@ async def init_db() -> None:
 async def check_database_health() -> bool:
     """检查数据库连接状态"""
     try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SELECT 1"))
+        async with db_pool.get_session() as session:
+            await session.execute(text("SELECT 1"))
             return True
     except Exception as e:
         logger.error(f"数据库健康检查失败: {str(e)}", exc_info=True)
         return False
 
+# --- 【修改】所有数据库操作函数统一使用 db_pool.get_session() ---
+
 async def get_setting(key: str, default_value: Optional[str] = None) -> Optional[str]:
     """获取设置项"""
     try:
         async with db_pool.get_session() as session:
-            result = await session.execute(
-                select(Setting).where(Setting.key == key)
-            )
+            result = await session.execute(select(Setting).where(Setting.key == key))
             setting = result.scalar_one_or_none()
             
             if setting is None and default_value is not None:
-                logger.info(f"设置项 '{key}' 不存在，使用默认值 '{default_value}'")
-                await set_setting(key, default_value)
+                await session.execute(insert(Setting).values(key=key, value=str(default_value)))
+                await session.commit()
                 return default_value
                 
             return setting.value if setting else None
@@ -170,19 +160,14 @@ async def get_setting(key: str, default_value: Optional[str] = None) -> Optional
 async def set_setting(key: str, value: str) -> None:
     """设置设置项"""
     try:
-        async with engine.connect() as conn:
-            check_stmt = select(Setting).where(Setting.key == key)
-            result = await conn.execute(check_stmt)
+        async with db_pool.get_session() as session:
+            stmt = update(Setting).where(Setting.key == key).values(value=str(value))
+            result = await session.execute(stmt)
             
-            if result.scalar_one_or_none():
-                update_stmt = update(Setting).where(Setting.key == key).values(value=str(value))
-                await conn.execute(update_stmt)
-            else:
-                new_setting = Setting(key=key, value=str(value))
-                session = AsyncSession(conn)
-                session.add(new_setting)
-                await session.commit()
+            if result.rowcount == 0:
+                await session.execute(insert(Setting).values(key=key, value=str(value)))
             
+            await session.commit()
             logger.info(f"设置项 '{key}' 已更新为: {value}")
     except Exception as e:
         logger.error(f"设置配置项 '{key}' 失败: {str(e)}", exc_info=True)
@@ -191,33 +176,21 @@ async def set_setting(key: str, value: str) -> None:
 @with_transaction
 async def get_open_positions(session: AsyncSession) -> List[Trade]:
     """获取所有未平仓仓位"""
-    try:
-        result = await session.execute(
-            select(Trade).where(Trade.status == 'OPEN')
-        )
-        positions = result.scalars().all()
-        logger.info(f"获取到 {len(positions)} 个未平仓位")
-        return positions
-    except Exception as e:
-        logger.error(f"获取持仓失败: {str(e)}", exc_info=True)
-        return []
+    result = await session.execute(select(Trade).where(Trade.status == 'OPEN'))
+    return result.scalars().all()
 
 async def log_trade(symbol: str, quantity: float, entry_price: float, 
                    trade_type: str, status: str = "OPEN", strategy_id: str = "default") -> int:
     """记录交易"""
     try:
-        async with engine.connect() as conn:
+        async with db_pool.get_session() as session:
             new_trade = Trade(
-                symbol=symbol,
-                quantity=quantity,
-                entry_price=entry_price,
-                trade_type=trade_type.upper(),
-                status=status.upper(),
-                strategy_id=strategy_id
+                symbol=symbol, quantity=quantity, entry_price=entry_price,
+                trade_type=trade_type.upper(), status=status.upper(), strategy_id=strategy_id
             )
-            session = AsyncSession(conn)
             session.add(new_trade)
             await session.commit()
+            await session.refresh(new_trade) # 获取自增 ID
             logger.info(f"记录交易: {symbol} {trade_type} {quantity} @ {entry_price} (ID: {new_trade.id})")
             return new_trade.id
     except Exception as e:
@@ -227,38 +200,33 @@ async def log_trade(symbol: str, quantity: float, entry_price: float,
 async def close_trade(trade_id: int, exit_price: float) -> bool:
     """平仓"""
     try:
-        async with engine.connect() as conn:
-            update_stmt = update(Trade).where(Trade.id == trade_id).values(
-                status='CLOSED',
-                exit_price=exit_price,
-                updated_at=func.now()
+        async with db_pool.get_session() as session:
+            stmt = update(Trade).where(Trade.id == trade_id).values(
+                status='CLOSED', exit_price=exit_price, updated_at=func.now()
             )
-            result = await conn.execute(update_stmt)
-            await conn.commit()
-            success = result.rowcount > 0
-            if success:
+            result = await session.execute(stmt)
+            await session.commit()
+            
+            if result.rowcount > 0:
                 logger.info(f"交易 {trade_id} 已平仓 @ {exit_price}")
-                return success
+                return True
+            return False
     except Exception as e:
         logger.error(f"平仓失败: {str(e)}", exc_info=True)
-        return False
+        raise # 【修改】重新抛出异常
 
 async def get_trade_history(symbol: Optional[str] = None, limit: Optional[int] = 10) -> List[Trade]:
     """获取交易历史"""
     try:
-        async with engine.connect() as conn:
+        async with db_pool.get_session() as session:
+            stmt = select(Trade).order_by(Trade.created_at.desc())
             if symbol:
-                stmt = select(Trade).where(Trade.symbol == symbol).order_by(Trade.created_at.desc())
-            else:
-                stmt = select(Trade).order_by(Trade.created_at.desc())
-            
+                stmt = stmt.where(Trade.symbol == symbol)
             if limit:
                 stmt = stmt.limit(limit)
-                
-            result = await conn.execute(stmt)
-            trades = result.scalars().all()
-            logger.info(f"获取到 {len(trades)} 条交易记录")
-            return trades
+            
+            result = await session.execute(stmt)
+            return result.scalars().all()
     except Exception as e:
         logger.error(f"获取交易历史失败: {str(e)}", exc_info=True)
         return []
@@ -266,26 +234,11 @@ async def get_trade_history(symbol: Optional[str] = None, limit: Optional[int] =
 async def get_position_by_symbol(symbol: str) -> Optional[Trade]:
     """根据交易对获取持仓"""
     try:
-        async with engine.connect() as conn:
-            stmt = select(Trade).where(
-                Trade.symbol == symbol,
-                Trade.status == 'OPEN'
-            )
-            result = await conn.execute(stmt)
-            position = result.scalar_one_or_none()
-            if position:
-                logger.info(f"找到 {symbol} 持仓: {position.quantity} @ {position.entry_price}")
-                return position
-            else:
-                logger.info(f"未找到 {symbol} 的持仓")
-                return None
+        async with db_pool.get_session() as session:
+            stmt = select(Trade).where(Trade.symbol == symbol, Trade.status == 'OPEN')
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
     except Exception as e:
         logger.error(f"获取持仓失败: {str(e)}", exc_info=True)
         return None
-
-async def get_db_connection() -> AsyncGenerator[AsyncSession, None]:
-    """获取数据库连接的上下文管理器"""
-    async with db_pool.get_session() as session:
-        yield session
-
-db_pool = DatabaseConnectionPool(engine)
+        
