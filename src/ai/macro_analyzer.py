@@ -82,28 +82,28 @@ class MacroAnalyzer:
                     f"宏观季节由 {self.last_known_season} 转为 BEAR. "
                     f"触发指令：清算所有多头仓位。"
                 )
-        
+     
         # 4. 更新"状态记忆"
         self.last_known_season = current_season
         
         # 5. 更新详细状态缓存
-        current_timestamp = time.time() # 使用 time.time() 获取时间戳
         self._detailed_status = {
             'trend': '牛' if current_season == 'BULL' else '熊' if current_season == 'BEAR' else '震荡',
             'btc1d': ai_analysis.get('btc_trend', '中性'),
             'eth1d': ai_analysis.get('eth_trend', '中性'),
             'confidence': ai_analysis.get('confidence', 0),
-            'last_update': current_timestamp
+            'last_update': ai_analysis.get('timestamp')
         }
-        self._last_status_update = current_timestamp
+        self._last_status_update = ai_analysis.get('timestamp', 0)
         
-        # 6. 将最新的宏观季节持久化到数据库
+        # 6. 【修改】将最新的宏观季节持久化到数据库
         try:
             from src.database import set_setting
             await set_setting('market_season', current_season)
             logger.info(f"宏观状态 '{current_season}' 已成功持久化到数据库")
         except Exception as e:
             logger.error(f"持久化宏观状态失败: {e}", exc_info=True)
+            # 即使持久化失败，程序也应该继续运行，不应中断
         
         # 7. 返回最终决策包
         return {
@@ -112,7 +112,7 @@ class MacroAnalyzer:
             "liquidation_signal": liquidation_signal,
             "reason": reason
         }
-    
+
     async def get_detailed_status(self) -> Dict[str, Any]:
         """
         获取详细的宏观状态信息，用于UI显示
