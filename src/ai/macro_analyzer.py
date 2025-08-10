@@ -17,37 +17,50 @@ class MacroAnalyzer:
         self._detailed_status: Optional[Dict[str, Any]] = None
         self._last_status_update: float = 0
     
-    # --- 【修改】get_macro_data 函数现在会加载真实的历史数据 ---
     async def get_macro_data(self) -> Dict[str, str]:
-        """获取宏观分析数据，现在会结合历史回测数据"""
+        """获取宏观分析数据，现在会批量加载并整合所有策略的历史数据"""
         
-        # 1. 加载历史数据
-        # 假设你的核心 Excel 文件名为 'strategy_summary.xlsx'
-        # 你可以根据你的实际文件名进行修改
-        strategy_df = load_strategy_data("strategy_summary.xlsx")
+        # 1. 定义你的策略文件“书单”
+        strategy_files = [
+            "BTC1d.xlsx",
+            "BTC10h.xlsx",
+            "ETH1d多.xlsx",
+            "ETH1d空.xlsx",
+            "ETH4h.xlsx",
+            "AVAX9h.xlsx",
+            "SOL10h.xlsx",
+            "ADA4h.xlsx"
+        ]
         
-        # 2. 从历史数据中提取关键信息
-        price_trend_summary = "历史数据未加载。"
-        onchain_summary = "链上数据分析待实现。"
-        funding_summary = "资金费率分析待实现。"
+        # 2. 准备一个容器来存放所有策略的摘要信息
+        all_summaries = []
 
-        if strategy_df is not None and not strategy_df.empty:
-            # 假设 Excel 中有 'summary' 列包含了分析摘要
-            # 这是一个示例，你需要根据你 Excel 的实际结构来提取
-            if 'price_trend_summary' in strategy_df.columns:
-                price_trend_summary = strategy_df['price_trend_summary'].iloc[0]
+        # 3. 循环加载并处理每一本书（策略文件）
+        for filename in strategy_files:
+            strategy_df = load_strategy_data(filename)
             
-            if 'onchain_summary' in strategy_df.columns:
-                onchain_summary = strategy_df['onchain_summary'].iloc[0]
-
-            if 'funding_summary' in strategy_df.columns:
-                funding_summary = strategy_df['funding_summary'].iloc[0]
+            if strategy_df is not None and not strategy_df.empty:
+                # 假设每个 Excel 文件都有一个名为 'summary' 的列，
+                # 并且第一行包含了对这个策略回测结果的文字总结。
+                # 你需要根据你 Excel 的实际结构来修改这里的 'summary'。
+                if 'summary' in strategy_df.columns:
+                    summary_text = strategy_df['summary'].iloc[0]
+                    # 我们在摘要前加上文件名，方便 AI 理解上下文
+                    all_summaries.append(f"策略 {filename} 的回测总结: {summary_text}")
+                else:
+                    logger.warning(f"在文件 {filename} 中找不到 'summary' 列，已跳过。")
         
-        # 3. 返回结合了历史数据的分析材料
+        # 4. 将所有摘要信息整合成一个大的段落
+        # 用换行符将每个策略的总结分开
+        combined_summary = "\n".join(all_summaries)
+
+        # 5. 返回整合后的分析材料
+        # 我们将所有策略的总结都放在 price_trend_summary 里，
+        # 让 AI 对所有策略的表现进行一次综合评估。
         return {
-            "price_trend_summary": price_trend_summary,
-            "onchain_summary": onchain_summary,
-            "funding_summary": funding_summary
+            "price_trend_summary": combined_summary if combined_summary else "未能加载任何策略的历史数据。",
+            "onchain_summary": "链上数据分析待实现。", # 其他字段暂时保持不变
+            "funding_summary": "资金费率分析待实现。"
         }
     
     async def analyze_market_status(self) -> Optional[Dict[str, Any]]:
