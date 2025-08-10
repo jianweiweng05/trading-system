@@ -3,7 +3,7 @@ import logging
 from typing import Dict, Any, Optional
 import httpx
 import json
-import time # 【修改】添加缺失的导入
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -14,11 +14,9 @@ class AIClient:
         self.api_key: str = api_key
         self.base_url: str = "https://api.deepseek.com/v1"
     
-    # --- 请用这段新代码，替换你现有的 analyze_macro 整个函数 ---
-
     async def analyze_macro(self, data: Dict[str, str]) -> Optional[Dict[str, Any]]:
         """分析宏观数据"""
-        # --- 【修改】强化了 Prompt 对 JSON 输出格式的要求 ---
+        # --- 【修改】修正了 prompt 中的中文逗号为英文逗号 ---
         prompt = f"""
 你是一位顶级的、遵循严格指令的宏观经济学家AI，为一家大型对冲基金提供每日的加密市场牛熊状态判断。
 
@@ -39,7 +37,7 @@ class AIClient:
 **输出格式要求:**
 你的回答必须是一个格式良好、可以被直接解析的JSON对象。
 绝对不要返回任何解释性文字、注释、代码块标记(```json ... ```)或除了这个JSON对象之外的任何其他内容。
-你的回答必须以 `{` 开始，以 `}` 结束。
+你的回答必须以 `{{` 开始，以 `}}` 结束。
 
 **JSON对象结构:**
 {{
@@ -63,8 +61,8 @@ class AIClient:
                     json={
                         "model": "deepseek-chat",
                         "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.1, # 降低温度，让输出更稳定
-                        "response_format": {"type": "json_object"} # 尝试使用模型的 JSON 模式
+                        "temperature": 0.1,
+                        "response_format": {"type": "json_object"}
                     },
                     timeout=60.0
                 )
@@ -72,7 +70,6 @@ class AIClient:
                 result = response.json()
                 content = result["choices"][0]["message"]["content"]
                 
-                # 增加日志，打印 AI 的原始返回内容，方便调试
                 logger.info(f"AI 原始返回内容: {content}")
                 
                 parsed_result = json.loads(content)
