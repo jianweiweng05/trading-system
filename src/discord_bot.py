@@ -1,4 +1,3 @@
-# --- 请用这段新代码，完整替换你现有的 discord_bot.py 文件 ---
 
 import logging
 import discord
@@ -7,7 +6,7 @@ from discord.ext import commands
 import asyncio
 from typing import Optional, Dict, Any
 from fastapi import FastAPI
-from sqlalchemy import text # 【修改】添加缺失的导入
+from sqlalchemy import text
 from src.config import CONFIG
 
 # ================= 日志配置 =================
@@ -76,7 +75,7 @@ class TradingCommands(commands.Cog, name="交易系统"):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
     
-    # --- 【修改】修复了数据库查询的 TypeError ---
+    # --- 【修改】get_macro_status 函数的数据库连接逻辑 ---
     async def get_macro_status(self) -> Dict[str, Any]:
         """获取宏观状态信息"""
         current_time = asyncio.get_event_loop().time()
@@ -86,15 +85,14 @@ class TradingCommands(commands.Cog, name="交易系统"):
             current_time - getattr(app_state, '_last_macro_update', 0) > 300):
             
             logger.info("更新宏观状态缓存...")
-            conn = None
             try:
                 from src.database import db_pool
-                conn = await db_pool.get_simple_session()
-                # 将 SQL 字符串用 text() 包裹起来
-                cursor = await conn.execute(text('SELECT symbol, status FROM tv_status'))
-                rows = await cursor.fetchall()
+                # 使用统一的、正确的数据库连接方式
+                async with db_pool.get_session() as session:
+                    result = await session.execute(text('SELECT symbol, status FROM tv_status'))
+                    rows = result.fetchall()
                 
-                tv_status = {row['symbol']: row['status'] for row in rows}
+                tv_status = {row[0]: row[1] for row in rows}
                 
                 app_state._macro_status = {
                     'trend': '未知',
@@ -115,13 +113,9 @@ class TradingCommands(commands.Cog, name="交易系统"):
                         'confidence': 0,
                         'last_update': current_time
                     }
-            finally:
-                if conn:
-                    await conn.close()
         
         return getattr(app_state, '_macro_status', {}).copy()
 
-    # --- 【修改】修复了 SyntaxError 并提取了重复逻辑 ---
     async def _create_status_embed(self) -> discord.Embed:
         """创建一个包含当前系统状态的 Discord Embed 对象"""
         embed = discord.Embed(
