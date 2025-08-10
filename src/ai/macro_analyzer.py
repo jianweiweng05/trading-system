@@ -18,7 +18,6 @@ class MacroAnalyzer:
         self._detailed_status: Optional[Dict[str, Any]] = None
         self._last_status_update: float = 0
     
-    # --- 【修改】get_macro_data 函数现在会自己计算回测总结 ---
     async def get_macro_data(self) -> Dict[str, str]:
         """获取宏观分析数据，现在会批量加载并自己计算所有策略的回测总结"""
         
@@ -33,43 +32,32 @@ class MacroAnalyzer:
             strategy_df = load_strategy_data(filename)
             
             if strategy_df is not None and not strategy_df.empty:
-                # --- 新增的 Pandas 数据分析逻辑 ---
                 try:
-                    # 假设你的 Excel/CSV 有一个名为 '净利润' 的列
-                    # 你需要根据你的实际列名进行修改
-                    PROFIT_COLUMN = '净利润'
+                    # --- 【修改】按行号和列号精确定位数据 ---
+                    # .iloc[rowIndex, colIndex] - 注意索引从0开始
+                    # '净利润' 在第3行(索引2)，第B列(索引1)
+                    net_profit = float(strategy_df.iloc[2, 1])
+                    # '毛利润' 在第4行(索引3)，第B列(索引1)
+                    gross_profit = float(strategy_df.iloc[3, 1])
+                    # '毛亏损' 在第5行(索引4)，第B列(索引1)
+                    gross_loss = float(strategy_df.iloc[4, 1])
                     
-                    if PROFIT_COLUMN not in strategy_df.columns:
-                        logger.warning(f"在文件 {filename} 中找不到 '{PROFIT_COLUMN}' 列，无法计算统计数据。")
-                        continue
-
-                    # 计算核心指标
-                    total_profit = strategy_df[PROFIT_COLUMN].sum()
-                    total_trades = len(strategy_df)
-                    winning_trades = strategy_df[strategy_df[PROFIT_COLUMN] > 0]
-                    losing_trades = strategy_df[strategy_df[PROFIT_COLUMN] < 0]
-                    
-                    win_rate = (len(winning_trades) / total_trades) * 100 if total_trades > 0 else 0
-                    
-                    avg_win = winning_trades[PROFIT_COLUMN].mean() if not winning_trades.empty else 0
-                    avg_loss = abs(losing_trades[PROFIT_COLUMN].mean()) if not losing_trades.empty else 0
-                    
-                    profit_factor = avg_win / avg_loss if avg_loss > 0 else float('inf')
-
-                    # 生成总结文本
+                    # 假设交易次数可以从其他地方获取，或者需要从另一个Sheet读取
+                    # 这里我们暂时无法从这张总结表里直接获得交易次数和胜率
+                    # 我们将基于现有数据生成一个可用的总结
                     summary_text = (
-                        f"总净利润 ${total_profit:,.2f}, "
-                        f"胜率 {win_rate:.2f}%, "
-                        f"盈亏比 {profit_factor:.2f}, "
-                        f"总交易次数 {total_trades}."
+                        f"总净利润 ${net_profit:,.2f}, "
+                        f"毛利润 ${gross_profit:,.2f}, "
+                        f"毛亏损 ${gross_loss:,.2f}."
                     )
                     all_summaries.append(f"策略 {filename} 的回测表现: {summary_text}")
 
-                except Exception as e:
-                    logger.error(f"为文件 {filename} 计算统计数据时出错: {e}")
+                except (IndexError, ValueError, TypeError) as e:
+                    logger.error(f"为文件 {filename} 提取或计算统计数据时出错: {e}。请检查Excel格式。")
         
         combined_summary = "\n".join(all_summaries)
 
+        from src.database import db_pool, text
         tv_status_summary = "TV 日线信号未知。"
         try:
             async with db_pool.get_session() as session:
