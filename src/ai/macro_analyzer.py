@@ -53,12 +53,22 @@ class MacroAnalyzer:
         
         if not ai_analysis:
             # 如果AI分析失败，返回一个安全的"无操作"指令
-            return {
-                "current_season": self.last_known_season or "UNKNOWN",
-                "liquidation_signal": None, # 无清场信号
-                "reason": "AI analysis failed, no action taken."
-            }
-
+        # 6. 【修改】将最新的宏观季节持久化到数据库
+        try:
+            from src.database import set_setting
+            await set_setting('market_season', current_season)
+            logger.info(f"宏观状态 '{current_season}' 已成功持久化到数据库")
+        except Exception as e:
+            logger.error(f"持久化宏观状态失败: {e}", exc_info=True)
+            # 即使持久化失败，程序也应该继续运行，不应中断
+        
+        # 7. 返回最终决策包
+        return {
+            "current_season": current_season,
+            "ai_confidence": ai_analysis.get('confidence'),
+            "liquidation_signal": liquidation_signal,
+            "reason": reason
+        }
         current_season = ai_analysis['market_season']
         liquidation_signal = None
         reason = f"AI analysis complete. Current season: {current_season}."
@@ -87,6 +97,8 @@ class MacroAnalyzer:
                     f"触发指令：清算所有多头仓位。"
                 )
         
+       # --- 请用这段新代码，替换上面那个旧的 "更新状态记忆" 及之后的部分 ---
+
         # 4. 更新"状态记忆"
         self.last_known_season = current_season
         
@@ -100,7 +112,16 @@ class MacroAnalyzer:
         }
         self._last_status_update = ai_analysis.get('timestamp', 0)
         
-        # 6. 返回最终决策包
+        # 6. 【修改】将最新的宏观季节持久化到数据库
+        try:
+            from src.database import set_setting
+            await set_setting('market_season', current_season)
+            logger.info(f"宏观状态 '{current_season}' 已成功持久化到数据库")
+        except Exception as e:
+            logger.error(f"持久化宏观状态失败: {e}", exc_info=True)
+            # 即使持久化失败，程序也应该继续运行，不应中断
+        
+        # 7. 返回最终决策包
         return {
             "current_season": current_season,
             "ai_confidence": ai_analysis.get('confidence'),
