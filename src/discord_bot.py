@@ -117,7 +117,7 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
                 await interaction.response.defer(ephemeral=True)
 
             from src.discord_ui import MainPanelView
-            from src.strategy_logic import get_confidence_weight # 【修改】导入转换器
+            from src.core_logic import get_confidence_weight # 【修改】导入转换器
 
             view = MainPanelView(self.bot)
             embed = discord.Embed(title="🎛️ 主控制面板", color=discord.Color.blue())
