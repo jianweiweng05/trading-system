@@ -81,7 +81,18 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
             if macro_analyzer:
                 # 调用 macro_analyzer 的 get_detailed_status() 方法获取详细数据
                 detailed_status = await macro_analyzer.get_detailed_status()
-                return detailed_status
+                
+                # 【修改】添加日志，记录获取到的原始数据
+                logger.info(f"从 macro_analyzer 获取到的原始数据: {detailed_status}")
+                
+                # 【修改】确保返回的数据格式正确
+                return {
+                    'trend': detailed_status.get('market_season', '未知'),
+                    'btc_trend': detailed_status.get('btc_trend', '未知'),
+                    'eth_trend': detailed_status.get('eth_trend', '未知'),
+                    'confidence': detailed_status.get('confidence', 0),
+                    'last_update': asyncio.get_event_loop().time()
+                }
             else:
                 logger.warning("未找到 macro_analyzer 实例")
                 return {
@@ -133,9 +144,10 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
             btc_trend = macro_status.get('btc_trend', '未知')
             eth_trend = macro_status.get('eth_trend', '未知')
             
+            # 【修改】添加日志，记录提取的数据
+            logger.info(f"提取的宏观状态数据: trend={trend}, btc_trend={btc_trend}, eth_trend={eth_trend}")
+            
             # 使用简化的显示格式
-            from src.discord_ui import MainPanelView
-            view = MainPanelView(self.bot)
             # 使用转换函数将状态转换为简化的中文显示
             trend_display = view._convert_macro_status(trend, btc_trend, eth_trend)
             
