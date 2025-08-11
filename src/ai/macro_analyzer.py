@@ -104,10 +104,11 @@ class MacroAnalyzer:
                 reason = f"宏观季节由 {self.last_known_season} 转为 BEAR. 触发指令：清算所有多头仓位。"
         self.last_known_season = current_season
         current_timestamp = ai_analysis.get('timestamp', time.time())
+        # 【修改】修改键名，使其与Discord机器人期望的一致
         self._detailed_status = {
             'trend': '牛' if current_season == 'BULL' else '熊' if current_season == 'BEAR' else '震荡',
-            'btc1d': ai_analysis.get('btc_trend', '中性'),
-            'eth1d': ai_analysis.get('eth_trend', '中性'),
+            'btc_trend': ai_analysis.get('btc_trend', '中性'),  # 【修改】从 btc1d 改为 btc_trend
+            'eth_trend': ai_analysis.get('eth_trend', '中性'),  # 【修改】从 eth1d 改为 eth_trend
             'confidence': ai_analysis.get('confidence', 0),
             'last_update': current_timestamp
         }
