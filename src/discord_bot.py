@@ -74,25 +74,21 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
     async def get_macro_status(self) -> Dict[str, Any]:
         """获取宏观状态信息"""
         try:
-            from src.database import db_pool
-            async with db_pool.get_session() as session:
-                # 查询 tv_status 表获取 BTC 和 ETH 的状态
-                result = await session.execute(text('SELECT symbol, status FROM tv_status'))
-                rows = result.fetchall()
-                
-                tv_status = {row[0]: row[1] for row in rows}
-                
-                # 查询 settings 表获取宏观季节
-                result = await session.execute(text("SELECT value FROM settings WHERE key = 'market_season'"))
-                market_season_row = result.fetchone()
-                market_season = market_season_row[0] if market_season_row else '未知'
-                
-                # 构建并返回状态字典
+            # 直接从 app.state 中获取 macro_analyzer 实例
+            app_state = self.bot.app.state
+            macro_analyzer = getattr(app_state, 'macro_analyzer', None)
+            
+            if macro_analyzer:
+                # 调用 macro_analyzer 的 get_detailed_status() 方法获取详细数据
+                detailed_status = await macro_analyzer.get_detailed_status()
+                return detailed_status
+            else:
+                logger.warning("未找到 macro_analyzer 实例")
                 return {
-                    'trend': market_season,
-                    'btc1d': tv_status.get('btc', CONFIG.default_btc_status),
-                    'eth1d': tv_status.get('eth', CONFIG.default_eth_status),
-                    'confidence': 0,  # 这个值暂时保留为0，如需可以从数据库中获取
+                    'trend': '未知',
+                    'btc1d': '未知',
+                    'eth1d': '未知',
+                    'confidence': 0,
                     'last_update': asyncio.get_event_loop().time()
                 }
                 
@@ -101,8 +97,8 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
             # 如果查询失败，返回默认状态
             return {
                 'trend': '未知',
-                'btc1d': CONFIG.default_btc_status,
-                'eth1d': CONFIG.default_eth_status,
+                'btc1d': '未知',
+                'eth1d': '未知',
                 'confidence': 0,
                 'last_update': asyncio.get_event_loop().time()
             }
@@ -117,7 +113,7 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
                 await interaction.response.defer(ephemeral=True)
 
             from src.discord_ui import MainPanelView
-            from src.core_logic import get_confidence_weight # 【修改】导入转换器
+            from src.strategy_logic import get_confidence_weight # 【修改】导入转换器
 
             view = MainPanelView(self.bot)
             embed = discord.Embed(title="🎛️ 主控制面板", color=discord.Color.blue())
@@ -132,7 +128,18 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
             ai_confidence = macro_status.get('confidence', 0.0)
             conf_weight = get_confidence_weight(ai_confidence)
             
-            macro_text = f"**宏观季节**: {macro_status.get('trend', '未知')}\n"
+            # 【修改】修改宏观状态显示逻辑，从详细状态报告中提取信息
+            trend = macro_status.get('trend', '未知')
+            btc_trend = macro_status.get('btc_trend', '未知')
+            eth_trend = macro_status.get('eth_trend', '未知')
+            
+            # 使用简化的显示格式
+            from src.discord_ui import MainPanelView
+            view = MainPanelView(self.bot)
+            # 使用转换函数将状态转换为简化的中文显示
+            trend_display = view._convert_macro_status(trend, btc_trend, eth_trend)
+            
+            macro_text = f"**宏观状态**: {trend_display}\n"
             macro_text += f"**AI 置信度**: {ai_confidence:.2f}\n"
             macro_text += f"**仓位系数**: {conf_weight:.2f}x"
             embed.add_field(name="🌍 宏观状态", value=macro_text, inline=True)
