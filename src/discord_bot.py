@@ -85,14 +85,14 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
                 # 【修改】添加日志，记录获取到的原始数据
                 logger.info(f"从 macro_analyzer 获取到的原始数据: {detailed_status}")
                 
-                # 【修改】确保返回的数据格式正确，使用正确的键名
                 return {
                     'trend': detailed_status.get('trend', '未知'),
                     'btc_trend': detailed_status.get('btc_trend', '未知'),
                     'eth_trend': detailed_status.get('eth_trend', '未知'),
                     'confidence': detailed_status.get('confidence', 0),
                     'last_update': detailed_status.get('last_update', asyncio.get_event_loop().time())
-                }
+                 }
+
             else:
                 logger.warning("未找到 macro_analyzer 实例")
                 return {
