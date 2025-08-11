@@ -155,7 +155,7 @@ def calculate_target_position_value(
     resonance_multiplier: float,
     dynamic_risk_coeff: float,
     confidence_weight: float
-) -> float:
+) -> Dict[str, float]:
     """
     最终目标仓位计算 (修正版，逻辑更清晰安全)
     """
@@ -163,9 +163,8 @@ def calculate_target_position_value(
     macro_multiplier = macro_decision.get("macro_multiplier", 0.0)
     base_leverage = macro_decision.get("base_leverage", 0.0)
     
-    # 2. 计算保证金 (所有动态系数相乘)
-    margin_to_use = (
-        account_equity * 
+    # 2. 计算最终仓位系数 (所有5个动态调节器相乘的结果)
+    final_position_coefficient = (
         allocation_percent * 
         macro_multiplier * 
         resonance_multiplier * 
@@ -173,8 +172,17 @@ def calculate_target_position_value(
         confidence_weight
     )
     
-    # 3. 乘以从指令中获取的、正确的杠杆
-    return margin_to_use * base_leverage
+    # 3. 计算保证金 (总权益 * 最终仓位系数)
+    margin_to_use = account_equity * final_position_coefficient
+    
+    # 4. 乘以从指令中获取的、正确的杠杆
+    target_value = margin_to_use * base_leverage
+
+    # 5. 返回一个包含两个关键结果的字典
+    return {
+        "target_position_value": target_value,
+        "final_position_coefficient": final_position_coefficient
+    }
 
 # --- 第四部分：熔断层 - 轻量版熔断控制 (无变动) ---
 def check_circuit_breaker(price_fall_4h: float, fear_greed_index: int) -> Optional[Dict]:
