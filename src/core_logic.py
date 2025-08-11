@@ -88,7 +88,7 @@ def get_resonance_decision(first_signal: str, combo_signals: Set[str]) -> Dict:
             
     return {"resonance_multiplier": c_r_total}
 
-# --- 第三部分：执行层 - 动态风险仓位计算器 (有修改) ---
+# --- 第三部分：执行层 - 动态风险仓位计算器 (无变动) ---
 def _extract_market_type(macro_status: str) -> Optional[str]:
     """从宏观状态字符串中提取市场类型"""
     return next(
@@ -126,26 +126,23 @@ def get_dynamic_risk_coefficient(current_drawdown: float) -> float:
     """
     return max(0.1, 1 - current_drawdown / MAX_DRAWDOWN_LIMIT)
 
-# --- 【修改】get_confidence_weight 函数 ---
 def get_confidence_weight(confidence: float) -> float:
     """
     根据 AI 置信度，返回阶梯式的仓位调节系数。
     遵循更严格的风险管理原则，将奖励性加仓上限设为 1.0x。
     """
-    # 【修改】增加输入验证，确保置信度在0-1之间
     if not 0.0 <= confidence <= 1.0:
         logger.warning(f"接收到无效的置信度值: {confidence}。将使用默认权重 1.0。")
-        # 在接收到无效值时，返回一个安全的中性值，而不是基于错误数据计算
         return 1.0
 
     if confidence >= 0.90:
-        return 1.0   # 【修改】奖励性加仓上限改为 1.0
+        return 1.0
     elif confidence >= 0.75:
-        return 1.0   # 正常仓位
+        return 1.0
     elif confidence >= 0.60:
-        return 0.6   # 惩罚性减仓
+        return 0.6
     else:
-        return 0.0   # 一票否决
+        return 0.0
 
 # --- 【修改】calculate_target_position_value 整个函数 ---
 def calculate_target_position_value(
