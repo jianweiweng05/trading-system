@@ -17,6 +17,17 @@ class MainPanelView(View):
 
     def _convert_macro_status(self, trend: str, btc_status: str, eth_status: str) -> str:
         """将宏观状态转换为简化的中文字符"""
+        # 状态映射表
+        status_map = {
+            'BULLISH': '牛',
+            'BEARISH': '熊',
+            'NEUTRAL': '中',
+            'UNKNOWN': '未知',
+            'neutral': '中',  # 处理小写情况
+            'bullish': '牛',  # 处理小写情况
+            'bearish': '熊'   # 处理小写情况
+        }
+        
         # 转换宏观季节
         trend_map = {
             'BULL': '牛',
@@ -28,20 +39,10 @@ class MainPanelView(View):
         trend_char = trend_map.get(trend.upper(), '未知')
         
         # 转换BTC状态
-        btc_map = {
-            'BULLISH': '牛',
-            'BEARISH': '熊',
-            'NEUTRAL': '中',
-            'UNKNOWN': '未知',
-            'neutral': '中',  # 处理小写情况
-            'bullish': '牛',  # 处理小写情况
-            'bearish': '熊'   # 处理小写情况
-         }
-
-        btc_char = btc_map.get(btc_status.upper(), '未知')
+        btc_char = status_map.get(btc_status.upper(), '未知')
         
         # 转换ETH状态
-        eth_char = btc_map.get(eth_status.upper(), '未知')
+        eth_char = status_map.get(eth_status.upper(), '未知')
         
         return f"{trend_char}/{btc_char}/{eth_char}"
 
