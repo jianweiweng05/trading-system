@@ -22,6 +22,7 @@ class MainPanelView(View):
             'BULL': '牛',
             'BEAR': '熊',
             'NEUTRAL': '中',
+            '中性': '中',  # 【修改】添加中文映射
             'UNKNOWN': '未知'
         }
         trend_char = trend_map.get(trend.upper(), '未知')
@@ -31,8 +32,11 @@ class MainPanelView(View):
             'BULLISH': '牛',
             'BEARISH': '熊',
             'NEUTRAL': '中',
+            '中性': '中',  # 【修改】添加中文映射
             'UNKNOWN': '未知',
-            'neutral': '中'  # 处理小写情况
+            'neutral': '中',  # 处理小写情况
+            'bullish': '牛',  # 【修改】添加小写映射
+            'bearish': '熊'   # 【修改】添加小写映射
         }
         btc_char = btc_map.get(btc_status.upper(), '未知')
         
@@ -55,10 +59,14 @@ class MainPanelView(View):
         if status_cog:
             macro_status = await status_cog.get_macro_status()
         
-        # 使用新的格式显示宏观状态
+        # 【修改】使用正确的键名获取数据
         trend = macro_status.get('trend', '未知')
-        btc_status = macro_status.get('btc1d', '未知')
-        eth_status = macro_status.get('eth1d', '未知')
+        btc_status = macro_status.get('btc_trend', '未知')  # 【修改】从 btc1d 改为 btc_trend
+        eth_status = macro_status.get('eth_trend', '未知')  # 【修改】从 eth1d 改为 eth_trend
+        
+        # 【修改】添加日志记录，帮助调试
+        logger.info(f"宏观状态数据: trend={trend}, btc_status={btc_status}, eth_status={eth_status}")
+        
         macro_text = self._convert_macro_status(trend, btc_status, eth_status)
         embed.add_field(name="🌍 宏观状态", value=macro_text, inline=True)
 
@@ -155,7 +163,7 @@ class MainPanelView(View):
             logger.error(f"显示报警历史失败: {e}", exc_info=True)
             await interaction.followup.send("❌ 获取报警历史失败。", ephemeral=True)
 
-    @discord.ui.button(label="⚙️ 参数设置", style=discord.ButtonStyle.secondary, custom_id="main_panel:settings")
+    @discord.ui.button(label="♙️ 参数设置", style=discord.ButtonStyle.secondary, custom_id="main_panel:settings")
     async def show_settings(self, interaction: discord.Interaction, button: Button):
         try:
             embed = discord.Embed(title="⚙️ 参数设置", description="此功能正在开发中，敬请期待。", color=discord.Color.purple())
