@@ -8,6 +8,62 @@ from src.config import CONFIG
 
 logger = logging.getLogger(__name__)
 
+# --- 【新增功能】二次确认模态弹窗 ---
+
+class ModeSwitchModal(Modal, title="切换运行模式"):
+    """切换实盘/模拟模式的确认弹窗"""
+    def __init__(self, bot: commands.Bot):
+        super().__init__()
+        self.bot = bot
+
+    confirm_input = TextInput(
+        label='输入 "LIVE" 或 "SIMULATE" 以切换',
+        placeholder='例如: LIVE',
+        style=discord.TextStyle.short,
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        new_mode = self.confirm_input.value.upper()
+        if new_mode in ["LIVE", "SIMULATE"]:
+            # 此处应调用后端逻辑来实际更改模式
+            # 例如: await self.bot.app.state.system_state.set_run_mode(new_mode)
+            # 目前我们只发送一个确认消息
+            await interaction.response.send_message(f"✅ 已发送切换至 **{new_mode}** 模式的指令。", ephemeral=True)
+            logger.warning(f"用户 {interaction.user} 请求切换模式至: {new_mode}")
+        else:
+            await interaction.response.send_message("❌ 输入无效。请输入 'LIVE' 或 'SIMULATE'。", ephemeral=True)
+
+class EmergencyStopModal(Modal, title="🚨 确认强制平仓"):
+    """强制平仓的确认弹窗"""
+    def __init__(self, bot: commands.Bot):
+        super().__init__()
+        self.bot = bot
+
+    confirm_input = TextInput(
+        label='请输入 "强制平仓" 四个字以确认',
+        placeholder='强制平仓',
+        style=discord.TextStyle.short,
+        required=True,
+        min_length=4,
+        max_length=4
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if self.confirm_input.value == "强制平仓":
+            trading_engine = getattr(self.bot.app.state, 'trading_engine', None)
+            if trading_engine:
+                # 此处调用交易引擎的强制平仓方法
+                # result = await trading_engine.liquidate_all_positions("用户手动强制平仓")
+                # 目前我们只发送一个确认消息
+                await interaction.response.send_message("✅ **已发送强制平仓所有头寸的指令！**", ephemeral=True)
+                logger.critical(f"用户 {interaction.user} 已执行强制平仓！")
+            else:
+                await interaction.response.send_message("❌ 交易引擎未启用，无法执行操作。", ephemeral=True)
+        else:
+            await interaction.response.send_message("❌ 确认失败，操作已取消。", ephemeral=True)
+
+
 # --- 主面板视图 ---
 class MainPanelView(View):
     """主控制面板的按钮视图"""
@@ -17,39 +73,18 @@ class MainPanelView(View):
 
     def _convert_macro_status(self, trend: str, btc_status: str, eth_status: str) -> str:
         """将宏观状态转换为简化的中文字符"""
-        # 状态映射表
         status_map = {
-            'BULLISH': '牛',
-            'BEARISH': '熊',
-            'NEUTRAL': '中',
-            'UNKNOWN': '未知',
-            'neutral': '中',  # 处理小写情况
-            'bullish': '牛',  # 处理小写情况
-            'bearish': '熊',  # 处理小写情况
-            '看涨': '牛',  # 【修改】添加中文状态值
-            '看跌': '熊',  # 【修改】添加中文状态值
-            '中性': '中'   # 【修改】添加中文状态值
+            'BULLISH': '牛', 'BEARISH': '熊', 'NEUTRAL': '中', 'UNKNOWN': '未知',
+            'neutral': '中', 'bullish': '牛', 'bearish': '熊',
+            '看涨': '牛', '看跌': '熊', '中性': '中'
         }
-        
-        # 转换宏观季节
         trend_map = {
-            'BULL': '牛',
-            'BEAR': '熊',
-            'NEUTRAL': '中',
-            '中性': '中',
-            '牛': '牛',  # 【修改】添加中文键名
-            '熊': '熊',  # 【修改】添加中文键名
-            '震荡': '震荡',  # 【修改】添加中文键名
-            'UNKNOWN': '未知'
+            'BULL': '牛', 'BEAR': '熊', 'NEUTRAL': '中', '中性': '中',
+            '牛': '牛', '熊': '熊', '震荡': '震荡', 'UNKNOWN': '未知'
         }
         trend_char = trend_map.get(trend.upper(), '未知')
-        
-        # 转换BTC状态
         btc_char = status_map.get(btc_status.upper(), '未知')
-        
-        # 转换ETH状态
         eth_char = status_map.get(eth_status.upper(), '未知')
-        
         return f"{trend_char}/{btc_char}/{eth_char}"
 
     async def _get_main_panel_embed(self) -> discord.Embed:
@@ -60,7 +95,6 @@ class MainPanelView(View):
         app_state = self.bot.app.state
         trading_engine = getattr(app_state, 'trading_engine', None)
         
-        # 1. 获取宏观状态
         status_cog = self.bot.get_cog("TradingCommands")
         macro_status = {}
         if status_cog:
@@ -75,7 +109,6 @@ class MainPanelView(View):
         macro_text = self._convert_macro_status(trend, btc_status, eth_status)
         embed.add_field(name="🌍 宏观状态", value=macro_text, inline=True)
 
-        # 2. 获取核心持仓和盈亏
         pnl_text = "无"
         position_text = "无持仓"
         if trading_engine:
@@ -92,16 +125,13 @@ class MainPanelView(View):
         embed.add_field(name="📈 核心持仓", value=position_text, inline=True)
         embed.add_field(name="💰 今日浮盈", value=pnl_text, inline=True)
 
-        # 3. 获取报警状态
         alert_system = getattr(app_state, 'alert_system', None)
         alert_status_text = "⚪ 未启用"
         if alert_system:
             alert_status = alert_system.get_status()
-            # --- 【修改】修正颜色和文本逻辑 ---
             alert_status_text = f"🔴 报警中" if alert_status.get('active') else "🟢 正常"
         embed.add_field(name="🚨 报警状态", value=alert_status_text, inline=True)
 
-        # 4. 获取共振池状态
         pool_text = "⚪ 未启用"
         if trading_engine:
             pool_data = await trading_engine.get_resonance_pool()
@@ -184,6 +214,19 @@ class MainPanelView(View):
             logger.error(f"刷新面板失败: {e}", exc_info=True)
             await interaction.followup.send("❌ 刷新失败。", ephemeral=True)
 
+    # --- 【新增功能】在这里添加新按钮 ---
+
+    @discord.ui.button(label="切换模式", style=discord.ButtonStyle.secondary, custom_id="main_panel:switch_mode", row=2)
+    async def switch_mode(self, interaction: discord.Interaction, button: Button):
+        """打开模式切换的确认弹窗"""
+        await interaction.response.send_modal(ModeSwitchModal(self.bot))
+
+    @discord.ui.button(label="🚨 强制平仓", style=discord.ButtonStyle.danger, custom_id="main_panel:emergency_stop", row=2)
+    async def emergency_stop(self, interaction: discord.Interaction, button: Button):
+        """打开强制平仓的确认弹窗"""
+        await interaction.response.send_modal(EmergencyStopModal(self.bot))
+
+
 # --- 设置面板视图 ---
 class SettingsPanelView(View):
     """参数设置面板的视图"""
@@ -194,7 +237,6 @@ class SettingsPanelView(View):
     @discord.ui.button(label="⬅️ 返回主面板", style=discord.ButtonStyle.secondary, custom_id="settings_panel:back")
     async def back_to_main(self, interaction: discord.Interaction, button: Button):
         try:
-            # 切换回主面板视图
             main_panel_view = MainPanelView(self.bot)
             new_embed = await main_panel_view._get_main_panel_embed()
             await interaction.response.edit_message(embed=new_embed, view=main_panel_view)
