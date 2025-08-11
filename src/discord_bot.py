@@ -1,4 +1,3 @@
-
 import logging
 import discord
 from discord import app_commands
@@ -74,42 +73,39 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
     
     async def get_macro_status(self) -> Dict[str, Any]:
         """获取宏观状态信息"""
-        current_time = asyncio.get_event_loop().time()
-        app_state = self.bot.app.state
-        
-        if (not hasattr(app_state, '_macro_status') or 
-            current_time - getattr(app_state, '_last_macro_update', 0) > 300):
-            
-            logger.info("更新宏观状态缓存...")
-            try:
-                from src.database import db_pool
-                async with db_pool.get_session() as session:
-                    result = await session.execute(text('SELECT symbol, status FROM tv_status'))
-                    rows = result.fetchall()
+        try:
+            from src.database import db_pool
+            async with db_pool.get_session() as session:
+                # 查询 tv_status 表获取 BTC 和 ETH 的状态
+                result = await session.execute(text('SELECT symbol, status FROM tv_status'))
+                rows = result.fetchall()
                 
                 tv_status = {row[0]: row[1] for row in rows}
                 
-                app_state._macro_status = {
-                    'trend': '未知',
+                # 查询 settings 表获取宏观季节
+                result = await session.execute(text("SELECT value FROM settings WHERE key = 'market_season'"))
+                market_season_row = result.fetchone()
+                market_season = market_season_row[0] if market_season_row else '未知'
+                
+                # 构建并返回状态字典
+                return {
+                    'trend': market_season,
                     'btc1d': tv_status.get('btc', CONFIG.default_btc_status),
                     'eth1d': tv_status.get('eth', CONFIG.default_eth_status),
-                    'confidence': 0,
-                    'last_update': current_time
+                    'confidence': 0,  # 这个值暂时保留为0，如需可以从数据库中获取
+                    'last_update': asyncio.get_event_loop().time()
                 }
-                app_state._last_macro_update = current_time
                 
-            except Exception as e:
-                logger.error(f"获取宏观状态失败: {e}")
-                if not hasattr(app_state, '_macro_status'):
-                    app_state._macro_status = {
-                        'trend': '未知',
-                        'btc1d': CONFIG.default_btc_status,
-                        'eth1d': CONFIG.default_eth_status,
-                        'confidence': 0,
-                        'last_update': current_time
-                    }
-        
-        return getattr(app_state, '_macro_status', {}).copy()
+        except Exception as e:
+            logger.error(f"获取宏观状态失败: {e}")
+            # 如果查询失败，返回默认状态
+            return {
+                'trend': '未知',
+                'btc1d': CONFIG.default_btc_status,
+                'eth1d': CONFIG.default_eth_status,
+                'confidence': 0,
+                'last_update': asyncio.get_event_loop().time()
+            }
 
     # --- 【修改】这是现在唯一的 UI 命令 ---
     @app_commands.command(name="status", description="显示系统主控制面板")
