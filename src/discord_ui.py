@@ -32,12 +32,12 @@ class MainPanelView(View):
             'BULLISH': '牛',
             'BEARISH': '熊',
             'NEUTRAL': '中',
-            '中性': '中',  # 【修改】添加中文映射
             'UNKNOWN': '未知',
             'neutral': '中',  # 处理小写情况
-            'bullish': '牛',  # 【修改】添加小写映射
-            'bearish': '熊'   # 【修改】添加小写映射
-        }
+            'bullish': '牛',  # 处理小写情况
+            'bearish': '熊'   # 处理小写情况
+         }
+
         btc_char = btc_map.get(btc_status.upper(), '未知')
         
         # 转换ETH状态
