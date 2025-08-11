@@ -53,67 +53,68 @@ class MainPanelView(View):
         return f"{trend_char}/{btc_char}/{eth_char}"
 
     async def _get_main_panel_embed(self) -> discord.Embed:
-        """一个辅助函数，用于生成主面板的 Embed 内容"""
-        embed = discord.Embed(title="🎛️ 主控制面板", color=discord.Color.blue())
-        embed.description = "使用下方按钮查看详细信息或进行操作。"
-        
-        app_state = self.bot.app.state
-        trading_engine = getattr(app_state, 'trading_engine', None)
-        
-        # 1. 获取宏观状态
-        status_cog = self.bot.get_cog("TradingCommands")
-        macro_status = {}
-        if status_cog:
-            macro_status = await status_cog.get_macro_status()
-        
-        # 【修改】使用正确的键名获取数据
-        trend = macro_status.get('trend', '未知')
-        btc_status = macro_status.get('btc_trend', '未知')  # 【修改】从 btc1d 改为 btc_trend
-        eth_status = macro_status.get('eth_trend', '未知')  # 【修改】从 eth1d 改为 eth_trend
-        
-        # 【修改】添加日志记录，帮助调试
-        logger.info(f"宏观状态数据: trend={trend}, btc_status={btc_status}, eth_status={eth_status}")
-        
-        macro_text = self._convert_macro_status(trend, btc_status, eth_status)
-        embed.add_field(name="🌍 宏观状态", value=macro_text, inline=True)
+    """一个辅助函数，用于生成主面板的 Embed 内容"""
+    embed = discord.Embed(title="🎛️ 主控制面板", color=discord.Color.blue())
+    embed.description = "使用下方按钮查看详细信息或进行操作。"
+    
+    app_state = self.bot.app.state
+    trading_engine = getattr(app_state, 'trading_engine', None)
+    
+    # 1. 获取宏观状态
+    status_cog = self.bot.get_cog("TradingCommands")
+    macro_status = {}
+    if status_cog:
+        macro_status = await status_cog.get_macro_status()
+    
+    # 【修改】使用正确的键名获取数据
+    trend = macro_status.get('trend', '未知')
+    btc_status = macro_status.get('btc_trend', '未知')  # 【修改】从 btc1d 改为 btc_trend
+    eth_status = macro_status.get('eth_trend', '未知')  # 【修改】从 eth1d 改为 eth_trend
+    
+    # 【修改】添加日志记录，帮助调试
+    logger.info(f"宏观状态数据: trend={trend}, btc_status={btc_status}, eth_status={eth_status}")
+    
+    macro_text = self._convert_macro_status(trend, btc_status, eth_status)
+    embed.add_field(name="🌍 宏观状态", value=macro_text, inline=True)
 
-        # 2. 获取核心持仓和盈亏
-        pnl_text = "无"
-        position_text = "无持仓"
-        if trading_engine:
-            positions = await trading_engine.get_position("*")
-            if positions:
-                total_pnl = sum(float(p.get('pnl', 0)) for p in positions.values() if p)
-                pnl_text = f"{'🟢' if total_pnl >= 0 else '🔴'} ${total_pnl:,.2f}"
-                
-                active_positions = [f"{p['symbol']} ({'多' if float(p.get('size',0)) > 0 else '空'})" 
-                                    for p in positions.values() if p and float(p.get('size', 0)) != 0]
-                if active_positions:
-                    position_text = ", ".join(active_positions)
+    # 2. 获取核心持仓和盈亏
+    pnl_text = "无"
+    position_text = "无持仓"
+    if trading_engine:
+        positions = await trading_engine.get_position("*")
+        if positions:
+            total_pnl = sum(float(p.get('pnl', 0)) for p in positions.values() if p)
+            pnl_text = f"{'🟢' if total_pnl >= 0 else '🔴'} ${total_pnl:,.2f}"
+            
+            active_positions = [f"{p['symbol']} ({'多' if float(p.get('size',0)) > 0 else '空'})" 
+                                for p in positions.values() if p and float(p.get('size', 0)) != 0]
+            if active_positions:
+                position_text = ", ".join(active_positions)
 
         embed.add_field(name="📈 核心持仓", value=position_text, inline=True)
         embed.add_field(name="💰 今日浮盈", value=pnl_text, inline=True)
 
-        # 3. 获取报警状态
-        alert_system = getattr(app_state, 'alert_system', None)
-        alert_status_text = "⚪ 未启用"
-        if alert_system:
-            alert_status = alert_system.get_status()
-            alert_status_text = f"{'🟢 正常' if alert_status.get('active') else '🔴 正常'}  # 【修改】根据状态显示不同颜色
-        embed.add_field(name="🚨 报警状态", value=alert_status_text, inline=True)
+    # 3. 获取报警状态
+    alert_system = getattr(app_state, 'alert_system', None)
+    alert_status_text = "⚪ 未启用"
+    if alert_system:
+        alert_status = alert_system.get_status()
+        alert_status_text = f"🟢 正常" if alert_status.get('active') else "🔴 正常"  # 【修改】修复语法错误
+    embed.add_field(name="🚨 报警状态", value=alert_status_text, inline=True)
 
-        # 4. 获取共振池状态
-        pool_text = "⚪ 未启用"
-        if trading_engine:
-            # 【修改】增加了 await
-            pool_data = await trading_engine.get_resonance_pool()
-            pool_text = f"⏳ {pool_data.get('pending_count', 0)} 个待处理"
-        embed.add_field(name="📡 共振池", value=pool_text, inline=True)
+    # 4. 获取共振池状态
+    pool_text = "⚪ 未启用"
+    if trading_engine:
+        # 【修改】增加了 await
+        pool_data = await trading_engine.get_resonance_pool()
+        pool_text = f"⏳ {pool_data.get('pending_count', 0)} 个待处理"
+    embed.add_field(name="📡 共振池", value=pool_text, inline=True)
 
-        embed.set_footer(text=f"模式: {CONFIG.run_mode.upper()} | 最后刷新于")
-        embed.timestamp = discord.utils.utcnow()
-        return embed
+    embed.set_footer(text=f"模式: {CONFIG.run_mode.upper()} | 最后刷新于")
+    embed.timestamp = discord.utils.utcnow()
+    return embed
 
+    
     @discord.ui.button(label="📊 详细持仓", style=discord.ButtonStyle.secondary, custom_id="main_panel:positions")
     async def show_positions(self, interaction: discord.Interaction, button: Button):
         try:
