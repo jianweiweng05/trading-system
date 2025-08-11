@@ -107,21 +107,63 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
                 'last_update': asyncio.get_event_loop().time()
             }
 
-    # --- 【修改】这是现在唯一的 UI 命令 ---
     @app_commands.command(name="status", description="显示系统主控制面板")
     async def status(self, interaction: discord.Interaction):
         """显示统一的、交互式的主控制面板"""
         try:
-            # 【修改】使用 edit_or_send 逻辑来处理刷新
             if interaction.message:
                 await interaction.response.defer()
             else:
                 await interaction.response.defer(ephemeral=True)
 
-            # 导入并使用新的 UI View
             from src.discord_ui import MainPanelView
+            from src.strategy_logic import get_confidence_weight # 【修改】导入转换器
+
             view = MainPanelView(self.bot)
-            embed = await view._get_main_panel_embed() # 调用辅助函数生成 embed
+            embed = discord.Embed(title="🎛️ 主控制面板", color=discord.Color.blue())
+            embed.description = "使用下方按钮查看详细信息或进行操作。"
+            
+            app_state = self.bot.app.state
+            trading_engine = getattr(app_state, 'trading_engine', None)
+            
+            macro_status = await self.get_macro_status()
+            
+            # 【修改】增加置信度和仓位系数的计算和显示
+            ai_confidence = macro_status.get('confidence', 0.0)
+            conf_weight = get_confidence_weight(ai_confidence)
+            
+            macro_text = f"**宏观季节**: {macro_status.get('trend', '未知')}\n"
+            macro_text += f"**AI 置信度**: {ai_confidence:.2f}\n"
+            macro_text += f"**仓位系数**: {conf_weight:.2f}x"
+            embed.add_field(name="🌍 宏观状态", value=macro_text, inline=True)
+
+            # ... (后面获取持仓、报警、共振池的逻辑保持不变) ...
+            pnl_text, position_text = "无", "无持仓"
+            if trading_engine:
+                positions = await trading_engine.get_position("*")
+                if positions:
+                    total_pnl = sum(float(p.get('pnl', 0)) for p in positions.values() if p)
+                    pnl_text = f"{'🟢' if total_pnl >= 0 else '🔴'} ${total_pnl:,.2f}"
+                    active_positions = [f"{p['symbol']} ({'多' if float(p.get('size',0)) > 0 else '空'})" for p in positions.values() if p and float(p.get('size', 0)) != 0]
+                    if active_positions: position_text = ", ".join(active_positions)
+            embed.add_field(name="📈 核心持仓", value=position_text, inline=True)
+            embed.add_field(name="💰 今日浮盈", value=pnl_text, inline=True)
+
+            alert_system = getattr(app_state, 'alert_system', None)
+            alert_status_text = "⚪ 未启用"
+            if alert_system:
+                alert_status = alert_system.get_status()
+                alert_status_text = f"{'🔴' if alert_status.get('active') else '🟢'} 正常"
+            embed.add_field(name="🚨 报警状态", value=alert_status_text, inline=True)
+
+            pool_text = "⚪ 未启用"
+            if trading_engine:
+                pool_data = await trading_engine.get_resonance_pool()
+                pool_text = f"⏳ {pool_data.get('pending_count', 0)} 个待处理"
+            embed.add_field(name="📡 共振池", value=pool_text, inline=True)
+
+            embed.set_footer(text=f"模式: {CONFIG.run_mode.upper()} | 最后刷新于")
+            embed.timestamp = discord.utils.utcnow()
 
             if interaction.message:
                 await interaction.edit_original_response(embed=embed, view=view)
@@ -130,11 +172,7 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
 
         except Exception as e:
             logger.error(f"status 命令执行失败: {e}", exc_info=True)
-            if interaction.response.is_done():
-                await interaction.followup.send("❌ 获取主面板失败，请检查日志。", ephemeral=True)
-            else:
-                await interaction.response.send_message("❌ 获取主面板失败，请检查日志。", ephemeral=True)
-
+            # ... (错误处理) ...
 # ================= 生命周期管理 =================
 async def initialize_bot(bot: commands.Bot, app: FastAPI):
     """初始化 Discord Bot"""
