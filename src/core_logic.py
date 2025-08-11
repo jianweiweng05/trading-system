@@ -134,34 +134,40 @@ def get_dynamic_risk_coefficient(current_drawdown: float) -> float:
     """
     return max(0.1, 1 - current_drawdown / MAX_DRAWDOWN_LIMIT)
 
+# --- 请将这个新函数，粘贴到 get_dynamic_risk_coefficient 和 calculate_target_position_value 之间 ---
+def get_confidence_weight(confidence: float) -> float:
+    """
+    根据 AI 置信度，返回阶梯式的仓位调节系数。
+    遵循风控建议，初期加仓上限设为 1.05x。
+    """
+    if confidence >= 0.90:
+        return 1.05  # 奖励性加仓 (初期保守上限)
+    elif confidence >= 0.75:
+        return 1.0   # 正常仓位
+    elif confidence >= 0.60:
+        return 0.6   # 惩罚性减仓
+    else:
+        return 0.0   # 一票否决
+
+# --- 请用这段新代码，替换你现有的 calculate_target_position_value 整个函数 ---
 def calculate_target_position_value(
     account_equity: float, 
     allocation_percent: float, 
-    # 修改参数名以匹配新的决策流程
     macro_decision: Dict[str, Any],
     resonance_multiplier: float,
     dynamic_risk_coeff: float,
+    confidence_weight: float, # 【修改】新增参数
     fixed_leverage: float
 ) -> float:
     """
     最终目标仓位计算
-    
-    Args:
-        account_equity: 账户权益
-        allocation_percent: 分配比例
-        macro_decision: 宏观决策字典
-        resonance_multiplier: 共振乘数
-        dynamic_risk_coeff: 动态风险系数
-        fixed_leverage: 固定杠杆倍数
-        
-    Returns:
-        float: 目标仓位价值
     """
-    # 从宏观决策中提取必要参数
     macro_multiplier = macro_decision.get("macro_multiplier", 0.0)
     base_leverage = macro_decision.get("base_leverage", 0.0)
     
-    margin_to_use = account_equity * allocation_percent * macro_multiplier * resonance_multiplier * dynamic_risk_coeff
+    # 【修改】在最终公式中乘以 confidence_weight
+    margin_to_use = account_equity * allocation_percent * macro_multiplier * resonance_multiplier * dynamic_risk_coeff * confidence_weight
+    
     return margin_to_use * fixed_leverage
 
 # --- 第四部分：熔断层 - 轻量版熔断控制 ---
