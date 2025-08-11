@@ -15,6 +15,32 @@ class MainPanelView(View):
         super().__init__(timeout=None)
         self.bot = bot
 
+    def _convert_macro_status(self, trend: str, btc_status: str, eth_status: str) -> str:
+        """将宏观状态转换为简化的中文字符"""
+        # 转换宏观季节
+        trend_map = {
+            'BULL': '牛',
+            'BEAR': '熊',
+            'NEUTRAL': '中',
+            'UNKNOWN': '未知'
+        }
+        trend_char = trend_map.get(trend.upper(), '未知')
+        
+        # 转换BTC状态
+        btc_map = {
+            'BULLISH': '牛',
+            'BEARISH': '熊',
+            'NEUTRAL': '中',
+            'UNKNOWN': '未知',
+            'neutral': '中'  # 处理小写情况
+        }
+        btc_char = btc_map.get(btc_status.upper(), '未知')
+        
+        # 转换ETH状态
+        eth_char = btc_map.get(eth_status.upper(), '未知')
+        
+        return f"{trend_char}/{btc_char}/{eth_char}"
+
     async def _get_main_panel_embed(self) -> discord.Embed:
         """一个辅助函数，用于生成主面板的 Embed 内容"""
         embed = discord.Embed(title="🎛️ 主控制面板", color=discord.Color.blue())
@@ -29,9 +55,11 @@ class MainPanelView(View):
         if status_cog:
             macro_status = await status_cog.get_macro_status()
         
-        macro_text = f"**宏观季节**: {macro_status.get('trend', '未知')}\n"
-        macro_text += f"**BTC 1D**: {macro_status.get('btc1d', '未知')}\n"
-        macro_text += f"**ETH 1D**: {macro_status.get('eth1d', '未知')}"
+        # 使用新的格式显示宏观状态
+        trend = macro_status.get('trend', '未知')
+        btc_status = macro_status.get('btc1d', '未知')
+        eth_status = macro_status.get('eth1d', '未知')
+        macro_text = self._convert_macro_status(trend, btc_status, eth_status)
         embed.add_field(name="🌍 宏观状态", value=macro_text, inline=True)
 
         # 2. 获取核心持仓和盈亏
