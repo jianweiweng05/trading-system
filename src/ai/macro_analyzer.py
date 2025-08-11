@@ -1,10 +1,10 @@
 import logging
 import time
 from typing import Dict, Any, Optional
-import pandas as pd # 【修改】导入 pandas 用于数据分析
+import pandas as pd
 from .ai_client import AIClient
 from src.data_loader import load_strategy_data
-from src.database import db_pool, text
+from src.database import db_pool, text, get_position_by_symbol # 【修改】新增导入
 
 logger = logging.getLogger(__name__)
 
@@ -32,18 +32,10 @@ class MacroAnalyzer:
             
             if strategy_df is not None and not strategy_df.empty:
                 try:
-                    # --- 【修改】按行号和列号精确定位数据 ---
-                    # .iloc[rowIndex, colIndex] - 注意索引从0开始
-                    # '净利润' 在第3行(索引2)，第B列(索引1)
                     net_profit = float(strategy_df.iloc[2, 1])
-                    # '毛利润' 在第4行(索引3)，第B列(索引1)
                     gross_profit = float(strategy_df.iloc[3, 1])
-                    # '毛亏损' 在第5行(索引4)，第B列(索引1)
                     gross_loss = float(strategy_df.iloc[4, 1])
                     
-                    # 假设交易次数可以从其他地方获取，或者需要从另一个Sheet读取
-                    # 这里我们暂时无法从这张总结表里直接获得交易次数和胜率
-                    # 我们将基于现有数据生成一个可用的总结
                     summary_text = (
                         f"总净利润 ${net_profit:,.2f}, "
                         f"毛利润 ${gross_profit:,.2f}, "
@@ -56,17 +48,55 @@ class MacroAnalyzer:
         
         combined_summary = "\n".join(all_summaries)
 
-        from src.database import db_pool, text
-        tv_status_summary = "TV 日线信号未知。"
-        try:
-            async with db_pool.get_session() as session:
-                result = await session.execute(text('SELECT symbol, status FROM tv_status'))
-                rows = result.fetchall()
-                if rows:
-                    status_texts = [f"{row[0].upper()} 的当前 1D 信号是 {row[1]}" for row in rows]
-                    tv_status_summary = " ".join(status_texts)
-        except Exception as e:
-            logger.error(f"在宏观分析中加载TV状态失败: {e}")
+        # --- 【修改】重写实时信号获取逻辑，优先内部事实 ---
+        
+        # 1. 定义需要关注的核心资产
+        core_assets = ['BTC', 'ETH']
+        status_texts = []
+
+        for asset in core_assets:
+            asset_status = "中性" # 默认状态为中性
+            
+            # 2. 优先查询内部真实持仓
+            # 注意：get_position_by_symbol 需要的 symbol 格式可能为 'BTC/USDT'
+            # 这里我们假设它能处理 'BTC' 这样的简单格式，如果不行则需要调整
+            open_position = await get_position_by_symbol(asset)
+            
+            if open_position:
+                # 如果有持仓，内部事实就是最可靠的信号
+                if open_position.trade_type == 'LONG':
+                    asset_status = "看涨"
+                elif open_position.trade_type == 'SHORT':
+                    asset_status = "看跌"
+                logger.info(f"检测到 {asset} 存在持仓，内部状态判定为: {asset_status}")
+            else:
+                # 3. 如果没有持仓，才去参考外部信号 (tv_status)
+                try:
+                    async with db_pool.get_session() as session:
+                        # 我们只关心最新的、有效的外部信号
+                        stmt = text("SELECT status FROM tv_status WHERE symbol = :symbol")
+                        result = await session.execute(stmt, {"symbol": asset.lower()})
+                        external_signal = result.scalar_one_or_none()
+                        
+                        if external_signal:
+                            # 这里可以根据需要转换信号格式，例如 'buy' -> '看涨'
+                            if external_signal.lower() in ['buy', 'long']:
+                                asset_status = "看涨机会"
+                            elif external_signal.lower() in ['sell', 'short']:
+                                asset_status = "看跌机会"
+                            else:
+                                asset_status = "中性" # 外部信号也是中性
+                            logger.info(f"{asset} 无持仓，参考外部信号判定为: {asset_status}")
+                        else:
+                            logger.info(f"{asset} 无持仓，且无有效外部信号，判定为: 中性")
+                            
+                except Exception as e:
+                    logger.error(f"查询 {asset} 的外部TV状态失败: {e}，判定为: 中性")
+
+            status_texts.append(f"{asset} 的当前状态是 {asset_status}")
+
+        tv_status_summary = ". ".join(status_texts)
+        # --- 【修改结束】---
 
         return {
             "price_trend_summary": combined_summary if combined_summary else "未能加载任何策略的历史数据。",
@@ -104,11 +134,10 @@ class MacroAnalyzer:
                 reason = f"宏观季节由 {self.last_known_season} 转为 BEAR. 触发指令：清算所有多头仓位。"
         self.last_known_season = current_season
         current_timestamp = ai_analysis.get('timestamp', time.time())
-        # 【修改】修改键名，使其与Discord机器人期望的一致
         self._detailed_status = {
             'trend': '牛' if current_season == 'BULL' else '熊' if current_season == 'BEAR' else '震荡',
-            'btc_trend': ai_analysis.get('btc_trend', '中性'),  # 【修改】从 btc1d 改为 btc_trend
-            'eth_trend': ai_analysis.get('eth_trend', '中性'),  # 【修改】从 eth1d 改为 eth_trend
+            'btc_trend': ai_analysis.get('btc_trend', '中性'),
+            'eth_trend': ai_analysis.get('eth_trend', '中性'),
             'confidence': ai_analysis.get('confidence', 0),
             'last_update': current_timestamp
         }
@@ -128,22 +157,20 @@ class MacroAnalyzer:
             logger.info("更新宏观状态缓存...")
             ai_analysis = await self.analyze_market_status()
             if ai_analysis:
-                # 【修改】修改键名，使其与Discord机器人期望的一致
                 self._detailed_status = {
                     'trend': '牛' if ai_analysis.get('market_season') == 'BULL' else '熊' if ai_analysis.get('market_season') == 'BEAR' else '震荡',
-                    'btc_trend': ai_analysis.get('btc_trend', '中性'),  # 【修改】从 btc1d 改为 btc_trend
-                    'eth_trend': ai_analysis.get('eth_trend', '中性'),  # 【修改】从 eth1d 改为 eth_trend
+                    'btc_trend': ai_analysis.get('btc_trend', '中性'),
+                    'eth_trend': ai_analysis.get('eth_trend', '中性'),
                     'confidence': ai_analysis.get('confidence', 0),
                     'last_update': ai_analysis.get('timestamp', current_time)
                 }
                 self._last_status_update = current_time
             else:
                 if not self._detailed_status:
-                    # 【修改】修改键名，使其与Discord机器人期望的一致
                     self._detailed_status = {
                         'trend': '未知', 
-                        'btc_trend': '未知',  # 【修改】从 btc1d 改为 btc_trend
-                        'eth_trend': '未知',  # 【修改】从 eth1d 改为 eth_trend
+                        'btc_trend': '未知',
+                        'eth_trend': '未知',
                         'confidence': 0, 
                         'last_update': current_time
                     }
