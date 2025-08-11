@@ -1,4 +1,3 @@
-
 import logging
 import os
 from typing import Optional, List, AsyncGenerator
@@ -74,6 +73,15 @@ class ResonanceSignal(Base):
     timestamp = Column(Float, nullable=False, index=True)
     status = Column(String, nullable=False, default='pending', index=True)
     created_at = Column(DateTime, default=func.now())
+
+# --- 【新增代码开始】---
+# 根据建议，添加缺失的 TVStatus 表定义
+class TVStatus(Base):
+    __tablename__ = 'tv_status'
+    symbol = Column(String, primary_key=True)
+    status = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+# --- 【新增代码结束】---
     
 from contextlib import asynccontextmanager # 确保这个导入在文件顶部
 
@@ -243,4 +251,27 @@ async def get_position_by_symbol(symbol: str) -> Optional[Trade]:
     except Exception as e:
         logger.error(f"获取持仓失败: {str(e)}", exc_info=True)
         return None
-        
+
+# --- 【新增代码开始】---
+# 根据建议，添加用于更新 TV 信号状态的函数
+async def update_tv_status(symbol: str, status: str) -> None:
+    """
+    更新或插入一个交易对的TV信号状态。
+    这是处理 Webhook 的逻辑应该调用的函数。
+    """
+    try:
+        async with db_pool.get_session() as session:
+            # 尝试更新现有记录
+            stmt = update(TVStatus).where(TVStatus.symbol == symbol).values(status=status)
+            result = await session.execute(stmt)
+            
+            # 如果没有记录被更新，说明是新符号，则插入
+            if result.rowcount == 0:
+                await session.execute(insert(TVStatus).values(symbol=symbol, status=status))
+            
+            await session.commit()
+            logger.info(f"TV 状态已更新: {symbol} -> {status}")
+    except Exception as e:
+        logger.error(f"更新 TV 状态失败: {symbol} -> {status}, 错误: {e}", exc_info=True)
+        raise
+# --- 【新增代码结束】---
