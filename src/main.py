@@ -1,4 +1,3 @@
-
 import logging
 import asyncio
 import time
@@ -27,7 +26,7 @@ from src.trading_engine import TradingEngine
 # --- 导入 Discord Bot 启动器 ---
 from src.discord_bot import start_discord_bot as run_discord_bot, stop_bot_services
 # --- 【修改】将所有数据库相关的导入统一放在这里 ---
-from src.database import get_setting, db_pool
+from src.database import get_setting, db_pool, update_tv_status
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -59,8 +58,7 @@ async def lifespan(app: FastAPI):
         from src.database import init_db
         await init_db()
         logger.info("✅ 数据库连接已建立")
-        await init_tv_status_table()
-        logger.info("✅ TV状态表已初始化")
+        # 【修改】删除了多余的 init_tv_status_table() 和相关日志
         
         # 2. 初始化交易所连接
         exchange = binance({
@@ -210,7 +208,8 @@ async def tradingview_webhook(request: Request):
         action = data.get('action', '').lower()
         
         if symbol in ['btc', 'eth'] and action in ['buy', 'sell', 'neutral']:
-            await save_tv_status(symbol, action)
+            # 【修改】调用从 database.py 导入的、全系统统一的函数
+            await update_tv_status(symbol, action)
             logger.info(f"更新 {symbol} 状态为: {action}")
             return {"status": "success", "message": f"Updated {symbol} status to {action}"}
         else:
@@ -224,10 +223,16 @@ async def tradingview_webhook(request: Request):
 async def get_tv_status():
     """获取TradingView状态"""
     try:
-        status = await load_tv_status()
+        # 【修改】直接使用 db_pool 查询，不再依赖已删除的 load_tv_status
+        status = {}
+        async with db_pool.get_session() as session:
+            result = await session.execute(text('SELECT symbol, status FROM tv_status'))
+            rows = result.fetchall()
+            for row in rows:
+                status[row[0]] = row[1]
         return {
-            "btc": status['btc'],
-            "eth": status['eth'],
+            "btc": status.get('btc', 'neutral'), # 增加默认值以防表为空
+            "eth": status.get('eth', 'neutral'), # 增加默认值以防表为空
             "last_update": time.time()
         }
     except Exception as e:
