@@ -36,49 +36,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# --- TV状态数据库操作 ---
-async def init_tv_status_table() -> None:
-    """初始化TV状态表"""
-    try:
-        async with db_pool.get_session() as session:
-            await session.execute(text('''
-                CREATE TABLE IF NOT EXISTS tv_status (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    symbol VARCHAR(10) NOT NULL UNIQUE,
-                    status VARCHAR(20) NOT NULL,
-                    timestamp REAL NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            '''))
-    except Exception as e:
-        logger.error(f"初始化TV状态表失败: {e}")
-        raise
-
-async def load_tv_status() -> Dict[str, str]:
-    """从数据库加载TV状态"""
-    status = {'btc': CONFIG.default_btc_status, 'eth': CONFIG.default_eth_status}
-    try:
-        async with db_pool.get_session() as session:
-            result = await session.execute(text('SELECT symbol, status FROM tv_status'))
-            rows = result.fetchall()
-            for row in rows:
-                status[row[0]] = row[1]
-    except Exception as e:
-        logger.error(f"加载TV状态失败: {e}")
-    return status
-
-async def save_tv_status(symbol: str, status: str) -> None:
-    """保存TV状态到数据库"""
-    try:
-        async with db_pool.get_session() as session:
-            await session.execute(text('''
-                INSERT OR REPLACE INTO tv_status (symbol, status, timestamp)
-                VALUES (:symbol, :status, :timestamp)
-            '''), {"symbol": symbol, "status": status, "timestamp": time.time()})
-    except Exception as e:
-        logger.error(f"保存TV状态失败: {e}")
-        raise
-
 # --- 安全启动任务包装函数 ---
 async def safe_start_task(task_func, name: str) -> Optional[asyncio.Task]:
     """安全启动任务的包装函数"""
