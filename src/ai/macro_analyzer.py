@@ -1,4 +1,3 @@
-
 import logging
 import time
 from typing import Dict, Any, Optional
@@ -128,15 +127,23 @@ class MacroAnalyzer:
             logger.info("更新宏观状态缓存...")
             ai_analysis = await self.analyze_market_status()
             if ai_analysis:
+                # 【修改】修改键名，使其与Discord机器人期望的一致
                 self._detailed_status = {
                     'trend': '牛' if ai_analysis.get('market_season') == 'BULL' else '熊' if ai_analysis.get('market_season') == 'BEAR' else '震荡',
-                    'btc1d': ai_analysis.get('btc_trend', '中性'),
-                    'eth1d': ai_analysis.get('eth_trend', '中性'),
+                    'btc_trend': ai_analysis.get('btc_trend', '中性'),  # 【修改】从 btc1d 改为 btc_trend
+                    'eth_trend': ai_analysis.get('eth_trend', '中性'),  # 【修改】从 eth1d 改为 eth_trend
                     'confidence': ai_analysis.get('confidence', 0),
                     'last_update': ai_analysis.get('timestamp', current_time)
                 }
                 self._last_status_update = current_time
             else:
                 if not self._detailed_status:
-                    self._detailed_status = {'trend': '未知', 'btc1d': '未知', 'eth1d': '未知', 'confidence': 0, 'last_update': current_time}
+                    # 【修改】修改键名，使其与Discord机器人期望的一致
+                    self._detailed_status = {
+                        'trend': '未知', 
+                        'btc_trend': '未知',  # 【修改】从 btc1d 改为 btc_trend
+                        'eth_trend': '未知',  # 【修改】从 eth1d 改为 eth_trend
+                        'confidence': 0, 
+                        'last_update': current_time
+                    }
         return self._detailed_status.copy()
