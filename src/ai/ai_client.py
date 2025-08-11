@@ -1,4 +1,3 @@
-
 import logging
 from typing import Dict, Any, Optional
 import httpx
@@ -30,7 +29,9 @@ class AIClient:
 - **当前实时信号:** {data.get('current_signals', '无')}
 
 **分析与决策流程:**
-1.  **逐一评估三大维度** (价格趋势, 链上根基, 资金燃料) 并给出0-1.5之间的分数。
+# --- 【最小化修改处】---
+# 将打分范围从 0-1.5 调整为 0-1.0，从根源上解决 confidence > 1 的问题。
+1.  **逐一评估三大维度** (价格趋势, 链上根基, 资金燃料) 并给出0-1.0之间的分数。
 2.  **计算综合指数** (`综合指数 = (价格分 * 40%) + (链上分 * 30%) + (资金分 * 30%)`)。
 3.  **最终状态判定** (牛市 ≥ 0.75, 熊市 ≤ 0.35, 否则为中性)。
 
@@ -42,7 +43,7 @@ class AIClient:
 **JSON对象结构:**
 {{
     "market_season": "BULL",
-    "confidence": 1.25,
+    "confidence": 0.95,
     "reasoning": "综合指数强劲，主要由资金流入和链上巨鲸增持驱动。",
     "status_changed": true,
     "btc_trend": "bullish",
