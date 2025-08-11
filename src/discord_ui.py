@@ -99,7 +99,7 @@ class MainPanelView(View):
         alert_status_text = "⚪ 未启用"
         if alert_system:
             alert_status = alert_system.get_status()
-            alert_status_text = f"{'🔴' if alert_status.get('active') else '🟢'} 正常"
+            alert_status_text = f"{'🟢 正常' if alert_status.get('active') else '🔴 正常'}  # 【修改】根据状态显示不同颜色
         embed.add_field(name="🚨 报警状态", value=alert_status_text, inline=True)
 
         # 4. 获取共振池状态
