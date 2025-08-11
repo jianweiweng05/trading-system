@@ -66,12 +66,10 @@ class MainPanelView(View):
         if status_cog:
             macro_status = await status_cog.get_macro_status()
         
-        # 【修改】使用正确的键名获取数据
         trend = macro_status.get('trend', '未知')
-        btc_status = macro_status.get('btc_trend', '未知')  # 【修改】从 btc1d 改为 btc_trend
-        eth_status = macro_status.get('eth_trend', '未知')  # 【修改】从 eth1d 改为 eth_trend
+        btc_status = macro_status.get('btc_trend', '未知')
+        eth_status = macro_status.get('eth_trend', '未知')
         
-        # 【修改】添加日志记录，帮助调试
         logger.info(f"宏观状态数据: trend={trend}, btc_status={btc_status}, eth_status={eth_status}")
         
         macro_text = self._convert_macro_status(trend, btc_status, eth_status)
@@ -99,13 +97,13 @@ class MainPanelView(View):
         alert_status_text = "⚪ 未启用"
         if alert_system:
             alert_status = alert_system.get_status()
-            alert_status_text = f"🟢 正常" if alert_status.get('active') else "🔴 正常"  # 【修改】修复语法错误
+            # --- 【修改】修正颜色和文本逻辑 ---
+            alert_status_text = f"🔴 报警中" if alert_status.get('active') else "🟢 正常"
         embed.add_field(name="🚨 报警状态", value=alert_status_text, inline=True)
 
         # 4. 获取共振池状态
         pool_text = "⚪ 未启用"
         if trading_engine:
-            # 【修改】增加了 await
             pool_data = await trading_engine.get_resonance_pool()
             pool_text = f"⏳ {pool_data.get('pending_count', 0)} 个待处理"
         embed.add_field(name="📡 共振池", value=pool_text, inline=True)
@@ -117,7 +115,6 @@ class MainPanelView(View):
     @discord.ui.button(label="📊 详细持仓", style=discord.ButtonStyle.secondary, custom_id="main_panel:positions")
     async def show_positions(self, interaction: discord.Interaction, button: Button):
         try:
-            # 【修改】使用 send_message 发送一个全新的、临时的响应
             await interaction.response.send_message("正在获取持仓信息...", ephemeral=True, delete_after=3)
             
             embed = discord.Embed(title="📊 详细持仓", color=discord.Color.blue())
@@ -146,7 +143,6 @@ class MainPanelView(View):
     @discord.ui.button(label="🚨 报警历史", style=discord.ButtonStyle.secondary, custom_id="main_panel:alerts")
     async def show_alerts(self, interaction: discord.Interaction, button: Button):
         try:
-            # 【修改】使用 send_message 发送一个全新的、临时的响应
             await interaction.response.send_message("正在获取报警历史...", ephemeral=True, delete_after=3)
             
             embed = discord.Embed(title="🚨 最近 5 条报警历史", color=discord.Color.orange())
@@ -182,12 +178,10 @@ class MainPanelView(View):
     @discord.ui.button(label="🔄 刷新", style=discord.ButtonStyle.primary, custom_id="main_panel:refresh")
     async def refresh_panel(self, interaction: discord.Interaction, button: Button):
         try:
-            # 【修改】正确的刷新逻辑：重新构建 Embed，然后用 edit_message 更新
             new_embed = await self._get_main_panel_embed()
             await interaction.response.edit_message(embed=new_embed, view=self)
         except Exception as e:
             logger.error(f"刷新面板失败: {e}", exc_info=True)
-            # 如果编辑失败，尝试发送一个错误消息
             await interaction.followup.send("❌ 刷新失败。", ephemeral=True)
 
 # --- 设置面板视图 ---
