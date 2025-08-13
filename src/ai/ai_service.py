@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import CONFIG
-from database import set_config
+from database import set_config, get_config
 from .macro_analyzer import MacroAnalyzer
 from .report_generator import ReportGenerator
 from .black_swan_radar import BlackSwanRadar
@@ -44,23 +44,33 @@ class AIService:
             logger.error(f"发送Discord消息失败: {e}", exc_info=True)
     
     async def daily_macro_check(self) -> None:
-        """每日宏观检查任务"""
-        logger.info("开始每日宏观牛熊状态检查...")
+        """每日宏观检查任务（适配优化版）"""
+        logger.info("开始每日宏观状态检查...")
         
-        result = await self.macro_analyzer.analyze_market_status()
-        if not result:
+        # 【修改】调用优化版的get_macro_decision方法
+        state, confidence = await self.macro_analyzer.get_macro_decision()
+        if not state:
             logger.error("AI宏观分析失败，跳过本次检查")
             return
         
-        new_status = result.get("bull_bear_status")
-        await set_config("macro_bull_bear_status", new_status)
-        logger.info(f"宏观状态已更新到主数据库: {new_status}")
+        # 【修改】状态映射
+        status_map = {
+            'BULL': '牛市',
+            'BEAR': '熊市',
+            'OSC': '震荡'
+        }
+        status_display = status_map.get(state, '未知')
         
-        if result.get("status_changed"):
+        await set_config("macro_market_state", state)  # 【修改】使用新字段名
+        logger.info(f"宏观状态已更新: {state} (置信度: {confidence:.2f})")
+        
+        # 【修改】状态变化检测逻辑
+        last_state = await get_config("macro_market_state") 
+        if last_state and last_state != state:
             title = "🚨 宏观状态变盘警报! 🚨"
-            content = f"**AI判断:** 市场已切换为 **{new_status}**\n" \
-                      f"**综合指数:** {result.get('composite_index')}\n" \
-                      f"**核心依据:** {result.get('reasoning')}"
+            content = f"**AI判断:** 市场已切换为 **{status_display}**\n" \
+                      f"**置信度:** {confidence:.2f}\n" \
+                      f"**前状态:** {status_map.get(last_state, '未知')}"
             await self.send_discord_webhook(
                 CONFIG.discord_alert_webhook,
                 content,
