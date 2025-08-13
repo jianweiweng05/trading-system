@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any, Optional, Tuple  # 【修改】新增Tuple类型提示
+from typing import Dict, Any, Optional, Tuple
 import httpx
 import json
 import time
