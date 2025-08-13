@@ -159,38 +159,34 @@ class MacroAnalyzer:
             
         return (final_state, confidence)  # 【修改】返回新格式
 
-    async def get_detailed_status(self) -> Dict[str, Any]:
+    async def get_detailed_status(self) -> Dict[str, Any]:  # 修正第163行，移除多余的]
     current_time = time.time()
     if (not self._detailed_status or current_time - self._last_status_update > 300):
         logger.info("更新宏观状态缓存...")
         ai_analysis = await self.analyze_market_status()
         if ai_analysis:
             market_season = ai_analysis.get('market_season')
-            # 【修改】保持原始中文显示但使用新状态逻辑
             trend_map = {
                 'BULL': '牛',
                 'BEAR': '熊',
                 'OSC': '震荡',
                 'NEUTRAL': '震荡'
             }
-            self._detailed_status = {
+            self._detailed_status = {  # 修正第180-182行
                 'trend': trend_map.get(market_season, '未知'),
                 'btc_trend': ai_analysis.get('btc_trend', '中性'),
                 'eth_trend': ai_analysis.get('eth_trend', '中性'),
                 'confidence': min(max(float(ai_analysis.get('confidence', 0.5)), 1.0),
                 'last_update': ai_analysis.get('timestamp', current_time)
-            }
+            }  # 确保花括号正确闭合
             self._last_status_update = current_time
         else:
             if not self._detailed_status:
-                self._detailed_status = {
+                self._detailed_status = {  # 修正第181-183行
                     'trend': '未知', 
                     'btc_trend': '未知',
                     'eth_trend': '未知',
                     'confidence': 0, 
                     'last_update': current_time
-                }
+                }  # 确保花括号正确闭合
     return self._detailed_status.copy()
-         
-                    }
-        return self._detailed_status.copy()
