@@ -72,20 +72,22 @@ class MainPanelView(View):
         self.bot = bot
 
     def _convert_macro_status(self, trend: str, btc_status: str, eth_status: str) -> str:
-        """将宏观状态转换为简化的中文字符"""
-        status_map = {
-            'BULLISH': '牛', 'BEARISH': '熊', 'NEUTRAL': '中', 'UNKNOWN': '未知',
-            'neutral': '中', 'bullish': '牛', 'bearish': '熊',
-            '看涨': '牛', '看跌': '熊', '中性': '中'
+        """将宏观状态转换为简化的中文字符（适配优化版）"""
+        # 【修改】状态映射表更新
+        state_map = {
+            'BULL': '🐂 牛市',
+            'BEAR': '🐻 熊市', 
+            'OSC': '🔄 震荡',
+            'neutral': '中',
+            'bullish': '牛',
+            'bearish': '熊'
         }
-        trend_map = {
-            'BULL': '牛', 'BEAR': '熊', 'NEUTRAL': '中', '中性': '中',
-            '牛': '牛', '熊': '熊', '震荡': '震荡', 'UNKNOWN': '未知'
-        }
-        trend_char = trend_map.get(trend.upper(), '未知')
-        btc_char = status_map.get(btc_status.upper(), '未知')
-        eth_char = status_map.get(eth_status.upper(), '未知')
-        return f"{trend_char}/{btc_char}/{eth_char}"
+        
+        trend_display = state_map.get(trend.upper(), '未知')
+        btc_display = state_map.get(btc_status.lower(), '未知')
+        eth_display = state_map.get(eth_status.lower(), '未知')
+        
+        return f"{trend_display} | BTC:{btc_display} | ETH:{eth_display}"
 
     async def _get_main_panel_embed(self) -> discord.Embed:
         """一个辅助函数，用于生成主面板的 Embed 内容"""
