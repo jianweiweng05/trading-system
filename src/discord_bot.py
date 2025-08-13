@@ -1,5 +1,6 @@
 import logging
 import discord
+import time
 from discord import app_commands
 from discord.ext import commands
 import asyncio
@@ -72,41 +73,38 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
         self.bot = bot
     
     async def get_macro_status(self) -> Dict[str, Any]:
-        """获取宏观状态信息（适配优化版格式）"""
+        """获取宏观状态信息（增加完整错误处理）"""
         try:
             app_state = self.bot.app.state
             macro_analyzer = getattr(app_state, 'macro_analyzer', None)
             
-            if macro_analyzer:
-                # 【修改】调用优化版的get_macro_decision方法
-                state, confidence = await macro_analyzer.get_macro_decision()
+            if not macro_analyzer:
+                logger.warning("macro_analyzer实例未找到")
+                return self._get_default_status()
                 
-                # 【修改】转换为优化版兼容格式
-                return {
-                    'state': state,  # BULL/OSC/BEAR
-                    'confidence': confidence,
-                    'btc_trend': 'neutral',  # 保持简单，详细趋势在UI层处理
-                    'eth_trend': 'neutral',
-                    'last_update': time.time()
-                }
-            else:
-                logger.warning("未找到macro_analyzer实例")
-                return {
-                    'state': 'OSC',  # 默认震荡状态
-                    'confidence': 0.5,
-                    'btc_trend': 'neutral',
-                    'eth_trend': 'neutral',
-                    'last_update': time.time()
-                }
-        except Exception as e:
-            logger.error(f"获取宏观状态失败: {e}")
+            state, confidence = await macro_analyzer.get_macro_decision()
+            
             return {
-                'state': 'OSC',
-                'confidence': 0.5,
-                'btc_trend': 'neutral',
-                'eth_trend': 'neutral',
+                'state': state,
+                'confidence': confidence,
+                'btc_trend': 'neutral',  # 默认值
+                'eth_trend': 'neutral',  # 默认值
                 'last_update': time.time()
             }
+            
+        except Exception as e:
+            logger.error(f"获取宏观状态失败: {e}", exc_info=True)
+            return self._get_default_status()
+
+    def _get_default_status(self) -> Dict[str, Any]:
+        """默认状态值"""
+        return {
+            'state': 'OSC',
+            'confidence': 0.5,
+            'btc_trend': 'neutral',
+            'eth_trend': 'neutral',
+            'last_update': time.time()
+        }
 
     @app_commands.command(name="status", description="显示系统主控制面板")
     async def status(self, interaction: discord.Interaction):
