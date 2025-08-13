@@ -159,36 +159,38 @@ class MacroAnalyzer:
             
         return (final_state, confidence)  # 【修改】返回新格式
 
-    # 【修改】此方法保持不变，但调整内部状态映射
     async def get_detailed_status(self) -> Dict[str, Any]:
-        current_time = time.time()
-        if (not self._detailed_status or current_time - self._last_status_update > 300):
-            logger.info("更新宏观状态缓存...")
-            ai_analysis = await self.analyze_market_status()
-            if ai_analysis:
-                market_season = ai_analysis.get('market_season')
-                # 【修改】保持原始中文显示但使用新状态逻辑
-                trend_map = {
-                    'BULL': '牛',
-                    'BEAR': '熊',
-                    'OSC': '震荡',
-                    'NEUTRAL': '震荡'
-                }
+    current_time = time.time()
+    if (not self._detailed_status or current_time - self._last_status_update > 300):
+        logger.info("更新宏观状态缓存...")
+        ai_analysis = await self.analyze_market_status()
+        if ai_analysis:
+            market_season = ai_analysis.get('market_season')
+            # 【修改】保持原始中文显示但使用新状态逻辑
+            trend_map = {
+                'BULL': '牛',
+                'BEAR': '熊',
+                'OSC': '震荡',
+                'NEUTRAL': '震荡'
+            }
+            self._detailed_status = {
+                'trend': trend_map.get(market_season, '未知'),
+                'btc_trend': ai_analysis.get('btc_trend', '中性'),
+                'eth_trend': ai_analysis.get('eth_trend', '中性'),
+                'confidence': min(max(float(ai_analysis.get('confidence', 0.5)), 1.0),
+                'last_update': ai_analysis.get('timestamp', current_time)
+            }
+            self._last_status_update = current_time
+        else:
+            if not self._detailed_status:
                 self._detailed_status = {
-                    'trend': trend_map.get(market_season, '未知'),
-                    'btc_trend': ai_analysis.get('btc_trend', '中性'),
-                    'eth_trend': ai_analysis.get('eth_trend', '中性'),
-                    'confidence': min(max(float(ai_analysis.get('confidence', 0.5)), 1.0),
-                    'last_update': ai_analysis.get('timestamp', current_time)
+                    'trend': '未知', 
+                    'btc_trend': '未知',
+                    'eth_trend': '未知',
+                    'confidence': 0, 
+                    'last_update': current_time
                 }
-                self._last_status_update = current_time
-            else:
-                if not self._detailed_status:
-                    self._detailed_status = {
-                        'trend': '未知', 
-                        'btc_trend': '未知',
-                        'eth_trend': '未知',
-                        'confidence': 0, 
-                        'last_update': current_time
+    return self._detailed_status.copy()
+         
                     }
         return self._detailed_status.copy()
