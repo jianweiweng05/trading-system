@@ -1,4 +1,3 @@
-
 import logging
 import asyncio
 import time
@@ -44,6 +43,8 @@ class TradingEngine:
         """
         logger.info("正在初始化交易引擎...")
         await self._load_resonance_pool_from_db()
+        # 【新增】初始化宏观状态
+        await self.get_macro_status()  
         logger.info("✅ 交易引擎初始化完成")
 
     async def execute_order(self, symbol: str, order_type: str, side: str, 
@@ -285,18 +286,23 @@ class TradingEngine:
             logger.error(f"从数据库加载共振池失败: {e}", exc_info=True)
             raise # 重新抛出异常，使应用启动失败
 
-    # --- 【修改】恢复了宏观状态相关函数的原始逻辑 ---
-    def get_macro_status(self) -> Dict[str, Any]:
-        """获取宏观状态信息"""
+    # --- 【修改】调整返回格式以匹配优化版要求 ---
+    async def get_macro_status(self) -> Dict[str, Any]:
+        """获取宏观状态信息（适配优化版格式）"""
         current_time = time.time()
         if (not self._macro_status or 
             current_time - self._last_macro_update > CONFIG.macro_cache_timeout):
-            logger.info("宏观状态缓存过期，返回默认值")
+            
+            # 【修改】返回优化版兼容格式
             self._macro_status = {
-                'trend': '未知', 'btc1d': '未知', 'eth1d': '未知',
-                'confidence': 0, 'last_update': current_time
+                'state': 'OSC',  # 默认震荡状态
+                'confidence': 0.5,
+                'btc_trend': 'neutral',
+                'eth_trend': 'neutral',
+                'last_update': current_time
             }
             self._last_macro_update = current_time
+        
         return self._macro_status.copy()
     
     def update_macro_status(self, trend: str, btc1d: str, eth1d: str, confidence: float = 0) -> None:
@@ -335,25 +341,3 @@ class TradingEngine:
             'pending_count': len(pending_signals),
             'last_update': current_time
         }
-
-    # --- 【修改】恢复为 async def ---
-    async def get_macro_status(self) -> Dict[str, Any]:
-        """获取宏观状态信息"""
-        current_time = time.time()
-        
-        if (not self._macro_status or 
-            current_time - self._last_macro_update > CONFIG.macro_cache_timeout):
-            
-            logger.info("宏观状态缓存过期，需要从 MacroAnalyzer 获取最新状态")
-            # 注意：实际的AI分析调用在MacroAnalyzer中，这里只返回缓存或默认值
-            # 这是一个简化的实现，未来可以优化为直接调用分析器
-            self._macro_status = {
-                'trend': '未知',
-                'btc1d': '未知',
-                'eth1d': '未知',
-                'confidence': 0,
-                'last_update': current_time
-            }
-            self._last_macro_update = current_time
-        
-        return self._macro_status.copy()
