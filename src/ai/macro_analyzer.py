@@ -176,7 +176,7 @@ class MacroAnalyzer:
                     'trend': trend_map.get(market_season, '未知'),
                     'btc_trend': ai_analysis.get('btc_trend', '中性'),
                     'eth_trend': ai_analysis.get('eth_trend', '中性'),
-                    'confidence': min(max(float(ai_analysis.get('confidence', 0.5)), 1.0),  # 补全括号
+                    'min(max(float(ai_analysis.get('confidence', 0.5))), 1.0)
                     'last_update': ai_analysis.get('timestamp', current_time)
                 }
                 self._last_status_update = current_time
