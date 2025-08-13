@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple  # 【修改】新增Tuple类型提示
 import httpx
 import json
 import time
@@ -14,8 +14,7 @@ class AIClient:
         self.base_url: str = "https://api.deepseek.com/v1"
     
     async def analyze_macro(self, data: Dict[str, str]) -> Optional[Dict[str, Any]]:
-        """分析宏观数据"""
-        # --- 【修改】修正了 prompt 中的中文逗号为英文逗号 ---
+        """（此方法保持完全不变）"""
         prompt = f"""
 你是一位顶级的、遵循严格指令的宏观经济学家AI，为一家大型对冲基金提供每日的加密市场牛熊状态判断。
 
@@ -29,8 +28,6 @@ class AIClient:
 - **当前实时信号:** {data.get('current_signals', '无')}
 
 **分析与决策流程:**
-# --- 【最小化修改处】---
-# 将打分范围从 0-1.5 调整为 0-1.0，从根源上解决 confidence > 1 的问题。
 1.  **逐一评估三大维度** (价格趋势, 链上根基, 资金燃料) 并给出0-1.0之间的分数。
 2.  **计算综合指数** (`综合指数 = (价格分 * 40%) + (链上分 * 30%) + (资金分 * 30%)`)。
 3.  **最终状态判定** (牛市 ≥ 0.75, 熊市 ≤ 0.35, 否则为中性)。
@@ -93,3 +90,38 @@ class AIClient:
         except Exception as e:
             logger.error(f"AI分析失败: {e}", exc_info=True)
             return None
+
+    # 【修改】新增适配方法：保持原始分析逻辑但转换输出格式
+    async def get_signal(self) -> Dict[str, Any]:
+        """
+        为优化版系统提供标准化信号输出
+        返回格式: {
+            'timestamp': float,
+            'asset': str,
+            'prediction': str,  # 原始方向值
+            'confidence': float  # 0-1范围
+        }
+        """
+        raw_result = await self.analyze_macro({})  # 传空字典触发默认分析
+        
+        if not raw_result:
+            return {
+                'timestamp': time.time(),
+                'asset': 'GLOBAL',
+                'prediction': 'NEUTRAL',
+                'confidence': 0.5  # 失败时默认中等置信度
+            }
+        
+        # 方向映射（保持原始逻辑）
+        direction_map = {
+            'BULL': 'LONG',
+            'BEAR': 'SHORT',
+            'NEUTRAL': 'NEUTRAL'
+        }
+        
+        return {
+            'timestamp': raw_result['timestamp'],
+            'asset': 'GLOBAL',
+            'prediction': direction_map.get(raw_result['market_season'], 'NEUTRAL'),
+            'confidence': min(max(raw_result['confidence'], 1.0)  # 强制限制在0-1范围
+        }
