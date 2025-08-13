@@ -141,12 +141,12 @@ class MacroAnalyzer:
         
         # 保持原始的状态缓存逻辑
         self._detailed_status = {
-            'trend': '牛' if current_season == 'BULL' else '熊' if current_season == 'BEAR' else '震荡',
+            'trend': trend_map.get(market_season, '未知'),
             'btc_trend': ai_analysis.get('btc_trend', '中性'),
             'eth_trend': ai_analysis.get('eth_trend', '中性'),
-            'confidence': confidence,
-            'last_update': current_timestamp
-        }
+            'confidence': min(max(float(ai_analysis.get('confidence', 0.5)), 1.0),  # 确保括号完整
+            'last_update': ai_analysis.get('timestamp', current_time)
+        }  # 第181行
         self._last_status_update = current_timestamp
         
         # 保持原始的持久化逻辑
