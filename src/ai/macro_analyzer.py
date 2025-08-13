@@ -160,7 +160,7 @@ class MacroAnalyzer:
         return (final_state, confidence)  # 【修改】返回新格式
 
     # 【修改】此方法保持不变，但调整内部状态映射
-    async def get_detailed_status(self) -> Dict[str, Any]]:
+    async def get_detailed_status(self) -> Dict[str, Any]:
         current_time = time.time()
         if (not self._detailed_status or current_time - self._last_status_update > 300):
             logger.info("更新宏观状态缓存...")
