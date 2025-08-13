@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Dict, Any, Optional, Tuple  # 【修改】新增Tuple类型提示
+from typing import Dict, Any, Optional, Tuple
 import pandas as pd
 from .ai_client import AIClient
 from src.data_loader import load_strategy_data
@@ -105,7 +105,6 @@ class MacroAnalyzer:
             return None
         return result
 
-    # 【修改】重点改造方法：调整输出格式为优化版兼容的三态结构
     async def get_macro_decision(self) -> Tuple[str, float]:
         """
         新返回格式: (state_enum, confidence_score)
@@ -157,7 +156,7 @@ class MacroAnalyzer:
         except Exception as e:
             logger.error(f"持久化宏观状态失败: {e}", exc_info=True)
             
-        return (final_state, confidence)  # 【修改】返回新格式
+        return (final_state, confidence)
 
     async def get_detailed_status(self) -> Dict[str, Any]:
         current_time = time.time()
