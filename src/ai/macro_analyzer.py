@@ -141,12 +141,12 @@ class MacroAnalyzer:
         
         # 保持原始的状态缓存逻辑
         self._detailed_status = {
-            'trend': trend_map.get(market_season, '未知'),
+            'trend': '牛' if current_season == 'BULL' else '熊' if current_season == 'BEAR' else '震荡',
             'btc_trend': ai_analysis.get('btc_trend', '中性'),
             'eth_trend': ai_analysis.get('eth_trend', '中性'),
-            'confidence': min(max(float(ai_analysis.get('confidence', 0.5)), 1.0),  # 确保括号完整
-            'last_update': ai_analysis.get('timestamp', current_time)
-        }  # 第181行
+            'confidence': confidence,
+            'last_update': current_timestamp
+        }
         self._last_status_update = current_timestamp
         
         # 保持原始的持久化逻辑
@@ -159,7 +159,7 @@ class MacroAnalyzer:
             
         return (final_state, confidence)  # 【修改】返回新格式
 
-        async def get_detailed_status(self) -> Dict[str, Any]:
+    async def get_detailed_status(self) -> Dict[str, Any]:
         current_time = time.time()
         if (not self._detailed_status or current_time - self._last_status_update > 300):
             logger.info("更新宏观状态缓存...")
@@ -176,7 +176,7 @@ class MacroAnalyzer:
                     'trend': trend_map.get(market_season, '未知'),
                     'btc_trend': ai_analysis.get('btc_trend', '中性'),
                     'eth_trend': ai_analysis.get('eth_trend', '中性'),
-                    'confidence': min(max(float(ai_analysis.get('confidence', 0.5)), 1.0),  # 修复这行
+                    'confidence': min(max(float(ai_analysis.get('confidence', 0.5)), 1.0),
                     'last_update': ai_analysis.get('timestamp', current_time)
                 }
                 self._last_status_update = current_time
