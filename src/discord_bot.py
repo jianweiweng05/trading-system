@@ -72,46 +72,40 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
         self.bot = bot
     
     async def get_macro_status(self) -> Dict[str, Any]:
-        """获取宏观状态信息"""
+        """获取宏观状态信息（适配优化版格式）"""
         try:
-            # 直接从 app.state 中获取 macro_analyzer 实例
             app_state = self.bot.app.state
             macro_analyzer = getattr(app_state, 'macro_analyzer', None)
             
             if macro_analyzer:
-                # 调用 macro_analyzer 的 get_detailed_status() 方法获取详细数据
-                detailed_status = await macro_analyzer.get_detailed_status()
+                # 【修改】调用优化版的get_macro_decision方法
+                state, confidence = await macro_analyzer.get_macro_decision()
                 
-                # 【修改】添加日志，记录获取到的原始数据
-                logger.info(f"从 macro_analyzer 获取到的原始数据: {detailed_status}")
-                
+                # 【修改】转换为优化版兼容格式
                 return {
-                    'trend': detailed_status.get('trend', '未知'),
-                    'btc_trend': detailed_status.get('btc_trend', '未知'),
-                    'eth_trend': detailed_status.get('eth_trend', '未知'),
-                    'confidence': detailed_status.get('confidence', 0),
-                    'last_update': detailed_status.get('last_update', asyncio.get_event_loop().time())
-                 }
-
-            else:
-                logger.warning("未找到 macro_analyzer 实例")
-                return {
-                    'trend': '未知',
-                    'btc_trend': '未知',
-                    'eth_trend': '未知',
-                    'confidence': 0,
-                    'last_update': asyncio.get_event_loop().time()
+                    'state': state,  # BULL/OSC/BEAR
+                    'confidence': confidence,
+                    'btc_trend': 'neutral',  # 保持简单，详细趋势在UI层处理
+                    'eth_trend': 'neutral',
+                    'last_update': time.time()
                 }
-                
+            else:
+                logger.warning("未找到macro_analyzer实例")
+                return {
+                    'state': 'OSC',  # 默认震荡状态
+                    'confidence': 0.5,
+                    'btc_trend': 'neutral',
+                    'eth_trend': 'neutral',
+                    'last_update': time.time()
+                }
         except Exception as e:
             logger.error(f"获取宏观状态失败: {e}")
-            # 如果查询失败，返回默认状态
             return {
-                'trend': '未知',
-                'btc_trend': '未知',
-                'eth_trend': '未知',
-                'confidence': 0,
-                'last_update': asyncio.get_event_loop().time()
+                'state': 'OSC',
+                'confidence': 0.5,
+                'btc_trend': 'neutral',
+                'eth_trend': 'neutral',
+                'last_update': time.time()
             }
 
     @app_commands.command(name="status", description="显示系统主控制面板")
@@ -139,19 +133,21 @@ class TradingCommands(commands.Cog, name="TradingCommands"): # 【修改】使�
             ai_confidence = macro_status.get('confidence', 0.0)
             conf_weight = get_confidence_weight(ai_confidence)
             
-            # 【修改】修改宏观状态显示逻辑，从详细状态报告中提取信息
-            trend = macro_status.get('trend', '未知')
-            btc_trend = macro_status.get('btc_trend', '未知')
-            eth_trend = macro_status.get('eth_trend', '未知')
+            # 【修改】修改宏观状态显示逻辑，使用三态系统
+            state = macro_status.get('state', 'OSC')
             
             # 【修改】添加日志，记录提取的数据
-            logger.info(f"提取的宏观状态数据: trend={trend}, btc_trend={btc_trend}, eth_trend={eth_trend}")
+            logger.info(f"提取的宏观状态数据: state={state}")
             
             # 使用简化的显示格式
-            # 使用转换函数将状态转换为简化的中文显示
-            trend_display = view._convert_macro_status(trend, btc_trend, eth_trend)
+            # 将三态状态转换为中文显示
+            state_display = {
+                'BULL': '🐂 牛市',
+                'BEAR': '🐻 熊市',
+                'OSC': '🔄 震荡'
+            }.get(state, '❓ 未知')
             
-            macro_text = f"**宏观状态**: {trend_display}\n"
+            macro_text = f"**宏观状态**: {state_display}\n"
             macro_text += f"**AI 置信度**: {ai_confidence:.2f}\n"
             macro_text += f"**仓位系数**: {conf_weight:.2f}x"
             embed.add_field(name="🌍 宏观状态", value=macro_text, inline=True)
