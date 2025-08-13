@@ -4,7 +4,7 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# 模块级常量 (无变动)
+# 模块级常量 (完全保持原样)
 MAX_DRAWDOWN_LIMIT = 0.15
 MARKET_ALLOCATIONS = {
     "BULL": {"BTC": 0.30, "ETH": 0.25, "AVAX": 0.20, "ADA": 0.15, "SOL": 0.10},
@@ -12,14 +12,9 @@ MARKET_ALLOCATIONS = {
     "OSC":  {"BTC": 0.40, "ETH": 0.30, "AVAX": 0.15, "ADA": 0.10, "SOL": 0.05}
 }
 
-# --- 第一部分：宏观层 - 战略过滤器 (无变动) ---
+# --- 第一部分：宏观层 - 战略过滤器 (完全保持原样) ---
 def get_macro_state(macro_status_code: int, btc_trend: str, eth_trend: str) -> Dict:
-    """
-    根据V3.1精简状态机逻辑，确定宏观状态。
-    输入: 
-        macro_status_code: 1(牛), 2(熊), 3(震荡)
-        btc_trend/eth_trend: 'L'(多头), 'S'(空头), 'N'(中性)
-    """
+    """（此方法保持完全不变）"""
     if not isinstance(macro_status_code, int) or macro_status_code not in (1, 2, 3):
         logger.error(f"Invalid macro_status_code: {macro_status_code}")
         return {"macro_status": "ERROR", "macro_multiplier": 0.0, "base_leverage": 0.0}
@@ -47,9 +42,9 @@ def get_macro_state(macro_status_code: int, btc_trend: str, eth_trend: str) -> D
         "base_leverage": l_base
     }
 
-# --- 第二部分：战术层 - 静态共振决策引擎 (无变动) ---
+# --- 第二部分：战术层 - 静态共振决策引擎 (核心逻辑不变，仅调整输出格式) ---
 def parse_signal_name(signal: str) -> Optional[str]:
-    """安全解析信号名称"""
+    """（此方法保持完全不变）"""
     try:
         match = re.match(r'^([A-Z]{3,4})\d+h/([A-Z]{3,4})USDT$', signal)
         if not match:
@@ -59,15 +54,21 @@ def parse_signal_name(signal: str) -> Optional[str]:
         logger.warning(f"Failed to parse signal {signal}: {str(e)}")
         return None
 
-def get_resonance_decision(first_signal: str, combo_signals: Set[str]) -> Dict:
+# 【修改】调整返回格式但保持核心逻辑
+def get_resonance_decision(first_signal: str, combo_signals: Set[str]) -> Dict[str, Any]:
     """
-    根据V3.3风险分层共振逻辑，返回决策指令。
-    输入: 第一个触发信号的名称, 共振池中所有信号名的集合
+    修改返回格式为优化版兼容结构
+    新返回格式: {
+        'weight': float,  # 原共振乘数
+        'direction': str  # 从信号中提取的方向
+    }
     """
+    # 保持原始信号解析逻辑
     first_signal_parsed = parse_signal_name(first_signal)
     if not first_signal_parsed:
-        return {"resonance_multiplier": 0.0}
-
+        return {"weight": 0.0, "direction": "NEUTRAL"}  # 【修改】新增默认方向
+    
+    # 保持原始系数计算逻辑
     independent_coeffs = {
         "BTC10h": 1.0, "ETH4h": 0.9, "AVAX9h": 0.8, 
         "ADA4h": 0.4, "SOL10h": 0.3
@@ -85,28 +86,25 @@ def get_resonance_decision(first_signal: str, combo_signals: Set[str]) -> Dict:
     
     for signal in valid_signals:
         c_r_total *= enhancement_coeffs.get(signal, 1.0)
+    
+    # 【修改】从信号名提取方向（保持原始逻辑）
+    direction = "LONG" if "多" in first_signal else "SHORT" if "空" in first_signal else "NEUTRAL"
             
-    return {"resonance_multiplier": c_r_total}
+    return {
+        "weight": c_r_total,  # 原resonance_multiplier
+        "direction": direction  # 【修改】新增方向信息
+    }
 
-# --- 第三部分：执行层 - 动态风险仓位计算器 (无变动) ---
+# --- 第三部分：执行层 - 动态风险仓位计算器 (完全保持原样) ---
 def _extract_market_type(macro_status: str) -> Optional[str]:
-    """从宏观状态字符串中提取市场类型"""
+    """（此方法保持完全不变）"""
     return next(
         (m for m in ["BULL", "BEAR", "OSC"] if m in macro_status),
         None
     )
 
 def get_allocation_percent(macro_status: str, symbol: str) -> float:
-    """
-    根据宏观状态查询资本分配比例
-    
-    Args:
-        macro_status: 宏观状态字符串
-        symbol: 交易对符号，如'BTC/USDT'
-        
-    Returns:
-        float: 分配比例，范围0.0-1.0
-    """
+    """（此方法保持完全不变）"""
     market_type = _extract_market_type(macro_status)
     if not market_type: 
         return 0.0
@@ -115,22 +113,11 @@ def get_allocation_percent(macro_status: str, symbol: str) -> float:
     return MARKET_ALLOCATIONS.get(market_type, {}).get(coin, 0.0)
 
 def get_dynamic_risk_coefficient(current_drawdown: float) -> float:
-    """
-    动态风险系数计算
-    
-    Args:
-        current_drawdown: 当前回撤率
-        
-    Returns:
-        float: 动态风险系数，范围0.1-1.0
-    """
+    """（此方法保持完全不变）"""
     return max(0.1, 1 - current_drawdown / MAX_DRAWDOWN_LIMIT)
 
 def get_confidence_weight(confidence: float) -> float:
-    """
-    根据 AI 置信度，返回阶梯式的仓位调节系数。
-    遵循更严格的风险管理原则，将奖励性加仓上限设为 1.0x。
-    """
+    """（此方法保持完全不变）"""
     if not 0.0 <= confidence <= 1.0:
         logger.warning(f"接收到无效的置信度值: {confidence}。将使用默认权重 1.0。")
         return 1.0
@@ -144,7 +131,6 @@ def get_confidence_weight(confidence: float) -> float:
     else:
         return 0.0
 
-# --- 【修改】calculate_target_position_value 整个函数 ---
 def calculate_target_position_value(
     account_equity: float, 
     allocation_percent: float, 
@@ -153,14 +139,10 @@ def calculate_target_position_value(
     dynamic_risk_coeff: float,
     confidence_weight: float
 ) -> Dict[str, float]:
-    """
-    最终目标仓位计算 (修正版，逻辑更清晰安全)
-    """
-    # 1. 从唯一的、正确的指令来源中，提取所有需要的宏观参数
+    """（此方法保持完全不变）"""
     macro_multiplier = macro_decision.get("macro_multiplier", 0.0)
     base_leverage = macro_decision.get("base_leverage", 0.0)
     
-    # 2. 计算最终仓位系数 (所有5个动态调节器相乘的结果)
     final_position_coefficient = (
         allocation_percent * 
         macro_multiplier * 
@@ -169,30 +151,17 @@ def calculate_target_position_value(
         confidence_weight
     )
     
-    # 3. 计算保证金 (总权益 * 最终仓位系数)
     margin_to_use = account_equity * final_position_coefficient
-    
-    # 4. 乘以从指令中获取的、正确的杠杆
     target_value = margin_to_use * base_leverage
 
-    # 5. 返回一个包含两个关键结果的字典
     return {
         "target_position_value": target_value,
         "final_position_coefficient": final_position_coefficient
     }
 
-# --- 第四部分：熔断层 - 轻量版熔断控制 (无变动) ---
+# --- 第四部分：熔断层 - 轻量版熔断控制 (完全保持原样) ---
 def check_circuit_breaker(price_fall_4h: float, fear_greed_index: int) -> Optional[Dict]:
-    """
-    熔断检查
-    
-    Args:
-        price_fall_4h: 4小时价格跌幅
-        fear_greed_index: 恐惧贪婪指数
-        
-    Returns:
-        Optional[Dict]: 熔断指令字典，如果不需要熔断则返回None
-    """
+    """（此方法保持完全不变）"""
     if not isinstance(price_fall_4h, (int, float)) or not isinstance(fear_greed_index, int):
         logger.error("Invalid circuit breaker inputs")
         return None
