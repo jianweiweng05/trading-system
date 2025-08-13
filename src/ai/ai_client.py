@@ -123,5 +123,5 @@ class AIClient:
             'timestamp': raw_result['timestamp'],
             'asset': 'GLOBAL',
             'prediction': direction_map.get(raw_result['market_season'], 'NEUTRAL'),
-            'confidence': min(max(raw_result['confidence'], 1.0)  # 强制限制在0-1范围
+            'confidence': min(max(raw_result['confidence'], 0.0), 1.0)  # 修复：添加了缺失的右括号和下限值
         }
