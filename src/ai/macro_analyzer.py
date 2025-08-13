@@ -18,7 +18,6 @@ class MacroAnalyzer:
         self._last_status_update: float = 0
     
     async def get_macro_data(self) -> Dict[str, str]:
-        """（此方法保持完全不变）"""
         strategy_files = [
             "BTC1d.xlsx", "BTC10h.xlsx", "ETH1d多.xlsx", "ETH1d空.xlsx",
             "ETH4h.xlsx", "AVAX9h.xlsx", "SOL10h.xlsx", "ADA4h.xlsx"
@@ -47,7 +46,6 @@ class MacroAnalyzer:
         
         combined_summary = "\n".join(all_summaries)
 
-        # --- 实时信号获取逻辑（完全保持原样）---
         core_assets = ['BTC', 'ETH']
         status_texts = []
 
@@ -86,7 +84,6 @@ class MacroAnalyzer:
             status_texts.append(f"{asset} 的当前状态是 {asset_status}")
 
         tv_status_summary = ". ".join(status_texts)
-        # --- ---
 
         return {
             "price_trend_summary": combined_summary if combined_summary else "未能加载任何策略的历史数据。",
@@ -96,7 +93,6 @@ class MacroAnalyzer:
         }
     
     async def analyze_market_status(self) -> Optional[Dict[str, Any]]:
-        # （此方法保持完全不变）
         logger.info("正在调用AI模型进行底层宏观分析...")
         macro_data = await self.get_macro_data()
         result = await self.ai_client.analyze_macro(macro_data)
@@ -106,39 +102,31 @@ class MacroAnalyzer:
         return result
 
     async def get_macro_decision(self) -> Tuple[str, float]:
-        """
-        新返回格式: (state_enum, confidence_score)
-        state_enum: 'BULL'/'OSC'/'BEAR'
-        confidence_score: 0-1之间的置信度
-        """
         logger.info("开始进行宏观决策...")
         ai_analysis = await self.analyze_market_status()
         if not ai_analysis:
             logger.warning("AI分析失败，使用最后已知状态")
             last_state = self.last_known_season or "OSC"
-            return (last_state, 0.5)  # 默认中等置信度
+            return (last_state, 0.5)
         
         current_season = ai_analysis['market_season']
-        confidence = min(max(float(ai_analysis.get('confidence', 0.5)), 1.0)  # 确保在0-1范围内
+        confidence = min(max(float(ai_analysis.get('confidence', 0.5)), 1.0)
         
-        # 状态映射
         state_map = {
-            'BULL': 'BULL',  # 保持不变
+            'BULL': 'BULL',
             'BEAR': 'BEAR',
-            'NEUTRAL': 'OSC',  # 中性映射为震荡
+            'NEUTRAL': 'OSC',
             'UNKNOWN': 'OSC'
         }
         
         final_state = state_map.get(current_season, 'OSC')
         
-        # 保留原始的季节切换检测逻辑（仅日志记录）
         if self.last_known_season and current_season != self.last_known_season:
             logger.warning(f"宏观季节发生切换！由 {self.last_known_season} 切换至 {current_season}")
         
         self.last_known_season = current_season
         current_timestamp = ai_analysis.get('timestamp', time.time())
         
-        # 保持原始的状态缓存逻辑
         self._detailed_status = {
             'trend': '牛' if current_season == 'BULL' else '熊' if current_season == 'BEAR' else '震荡',
             'btc_trend': ai_analysis.get('btc_trend', '中性'),
@@ -148,7 +136,6 @@ class MacroAnalyzer:
         }
         self._last_status_update = current_timestamp
         
-        # 保持原始的持久化逻辑
         try:
             from src.database import set_setting
             await set_setting('market_season', current_season)
