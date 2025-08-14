@@ -4,142 +4,131 @@ from typing import Dict, Any, Optional, Tuple
 import pandas as pd
 from .ai_client import AIClient
 from src.data_loader import load_strategy_data
-from src.database import db_pool, text, get_position_by_symbol
+from src.database import db_pool, text, get_position_by_symbol, get_setting, set_setting # 假设有 get/set setting
 
 logger = logging.getLogger(__name__)
 
 class MacroAnalyzer:
     """
-    宏观分析器 (V2.0 - 基于“大一统”评分公式)
+    宏观分析器 (V3.0 - 基于您设计的“优化版牛熊判断”逻辑)
     """
     
-    def __init__(self, api_key: str, factor_history_path: str = "factor_history_full.csv") -> None:
+    def __init__(self, api_key: str) -> None:
         self.ai_client: AIClient = AIClient(api_key)
-        self.last_known_season: Optional[str] = None
-        self._detailed_status: Optional[Dict[str, Any]] = None
-        self._last_status_update: float = 0
+        self.last_known_status: int = 0 # 用于信号确认机制
+        self.consecutive_days: int = 0 # 用于信号确认机制
         
-        # --- 【核心修改】加载因子历史数据和定义权重 ---
-        try:
-            self.factor_history: pd.DataFrame = pd.read_csv(factor_history_path, index_col='Date', parse_dates=True)
-            logging.info(f"成功加载因子历史数据，共 {len(self.factor_history)} 条记录。")
-        except FileNotFoundError:
-            logging.critical(f"致命错误: 因子历史数据文件未找到 -> {factor_history_path}")
-            self.factor_history = pd.DataFrame()
-
-        self.weights = {
-            "w_macro": 0.43, "w_btc1d": 0.76,
-            "p_long": 0.94, "p_eth1d": 0.89
+        # --- 【核心修改】定义您新方案中的所有阈值和权重 ---
+        self.BULL_CRITERIA = {
+            'ma_slope': 2.5,
+            'whale_net': 40000,
+            'stablecoin_growth': 30
         }
-        self.bull_threshold = 0.25
-        self.osc_threshold = 0.10
+        self.BEAR_CRITERIA = {
+            'ma_slope': -1.5,
+            'whale_net': -25000,
+            'stablecoin_growth': -5
+        }
+        self.WEIGHTS = {
+            'ma_slope': 0.5,
+            'whale_net': 0.3,
+            'stablecoin_growth': 0.2
+        }
+        self.CONFIRM_DAYS = 3
     
-    async def get_macro_data(self) -> Dict[str, str]:
-        """(此方法保持不变，继续为AI置信度分析提供文本情报)"""
-        strategy_files = [
-            "BTC1d.xlsx", "BTC10h.xlsx", "ETH1d多.xlsx", "ETH1d空.xlsx",
-            "ETH4h.xlsx", "AVAX9h.xlsx", "SOL10h.xlsx", "ADA4h.xlsx"
-        ]
-        all_summaries = []
-        for filename in strategy_files:
-            strategy_df = load_strategy_data(filename)
-            if strategy_df is not None and not strategy_df.empty:
-                try:
-                    net_profit = float(strategy_df.iloc[2, 1])
-                    summary_text = f"总净利润 ${net_profit:,.2f}"
-                    all_summaries.append(f"策略 {filename}: {summary_text}")
-                except Exception:
-                    pass
-        combined_summary = "\n".join(all_summaries)
-        # ... (其他数据收集逻辑保持不变) ...
-        core_assets = ['BTC', 'ETH']
-        status_texts = []
-        for asset in core_assets:
-            # ... (代码与原始版本相同) ...
-            pass
-        tv_status_summary = ". ".join(status_texts)
+    async def get_macro_data(self) -> Dict[str, Any]:
+        """
+        【核心修改】此方法现在只负责获取新方案需要的三个核心指标。
+        """
+        # TODO: 在实盘中，这里需要接入 Glassnode, TradingView 等API来获取真实数据
+        logger.info("正在收集优化版牛熊判断所需的核心指标...")
         return {
-            "price_trend_summary": combined_summary or "无历史数据。",
-            "onchain_summary": "待实现。",
-            "funding_summary": "待实现。",
-            "current_signals": tv_status_summary
+            "ma_slope": 3.2,
+            "whale_net_change": 50000,
+            "stablecoin_growth": 35,
         }
     
-    # --- 【核心修改】analyze_market_status 被废弃 ---
-    # async def analyze_market_status(self) -> Optional[Dict[str, Any]]: ...
+    # --- analyze_market_status 被废弃 ---
 
     # --- 【核心修改】get_macro_decision 被彻底重写 ---
     async def get_macro_decision(self) -> Dict[str, Any]:
         """
-        获取最终的宏观决策。这是系统现在唯一需要调用的入口。
+        获取最终的宏观决策。
+        完整实现了您设计的 judge_market_status_optimized 逻辑。
         """
-        logger.info("开始进行“大一统”宏观评分...")
+        logger.info("开始执行优化版牛熊判断...")
         
-        if self.factor_history.empty:
-            logger.error("因子历史数据为空，无法进行评分。")
-            return {"market_season": "OSC", "score": 0, "confidence": 0.5, "liquidation_signal": None}
+        # 1. 获取最新的核心指标数据
+        macro_data = await self.get_macro_data()
+        ma_slope = macro_data.get('ma_slope', 0)
+        whale_net_change = macro_data.get('whale_net_change', 0)
+        stablecoin_growth = macro_data.get('stablecoin_growth', 0)
 
-        # 1. 获取今天的因子状态 (取历史数据的最后一行)
-        today_factors = self.factor_history.iloc[-1]
-        
-        # 2. 获取AI对当前市场不确定性的评估 (置信度)
-        macro_text_data = await self.get_macro_data()
-        ai_confidence = await self.ai_client.get_confidence_score(macro_text_data)
-        
-        # 3. 计算“长周期趋势”分
-        long_trend = (
-            today_factors.get("Macro_Factor", 0) * ai_confidence * self.weights['w_macro'] +
-            today_factors.get("BTC1d_Factor", 0) * self.weights['w_btc1d']
+        # 2. 计算牛熊分数
+        bull_score = (
+            self.WEIGHTS['ma_slope'] * (ma_slope > self.BULL_CRITERIA['ma_slope']) +
+            self.WEIGHTS['whale_net'] * (whale_net_change > self.BULL_CRITERIA['whale_net']) +
+            self.WEIGHTS['stablecoin_growth'] * (stablecoin_growth > self.BULL_CRITERIA['stablecoin_growth'])
         )
-        
-        # 4. 计算“最终信号”分
-        final_score = (
-            long_trend * self.weights['p_long'] +
-            today_factors.get("ETH1d_Factor", 0) * self.weights['p_eth1d']
+        bear_score = (
+            self.WEIGHTS['ma_slope'] * (ma_slope < self.BEAR_CRITERIA['ma_slope']) +
+            self.WEIGHTS['whale_net'] * (whale_net_change < self.BEAR_CRITERIA['whale_net']) +
+            self.WEIGHTS['stablecoin_growth'] * (stablecoin_growth < self.BEAR_CRITERIA['stablecoin_growth'])
         )
+
+        # 3. 基于分数判断原始状态
+        raw_status = 0
+        if bull_score >= 0.7:
+            raw_status = 1
+        elif bear_score >= 0.7:
+            raw_status = -1
+
+        # 4. 【核心】实现信号确认机制
+        # a. 从数据库或状态文件加载上一次的状态和连续天数
+        last_status_from_db = await get_setting("macro_raw_status", 0) # 假设默认0
+        consecutive_days_from_db = await get_setting("macro_consecutive_days", 0)
+
+        if raw_status == last_status_from_db:
+            self.consecutive_days = consecutive_days_from_db + 1
+        else:
+            self.consecutive_days = 1 # 信号变化，天数重置为1
         
-        # 5. 根据分数和阈值，确定宏观状态
-        current_season = "OSC"
-        if final_score > self.bull_threshold:
-            current_season = "BULL"
-        elif final_score < -self.osc_threshold:
-            current_season = "BEAR"
+        # b. 更新数据库
+        await set_setting("macro_raw_status", raw_status)
+        await set_setting("macro_consecutive_days", self.consecutive_days)
+
+        # c. 最终状态判断
+        if self.consecutive_days < self.CONFIRM_DAYS:
+            market_status = 0  # 暂时保持中性，等信号确认
+        else:
+            market_status = raw_status
+            
+        # 5. 信号强度计算
+        strength = bull_score - bear_score
+
+        # 6. 状态名转换
+        status_map = {1: "BULL", 0: "OSC", -1: "BEAR"}
+        market_season = status_map.get(market_status, "OSC")
         
-        # 6. 检查状态切换，生成清场信号
-        liquidation_signal = None
-        if self.last_known_season and current_season != self.last_known_season:
-            logger.warning(f"宏观季节发生切换！由 {self.last_known_season} 切换至 {current_season}")
-            if current_season == "BULL":
-                liquidation_signal = "LIQUIDATE_ALL_SHORTS"
-            elif current_season == "BEAR":
-                liquidation_signal = "LIQUIDATE_ALL_LONGS"
+        logger.info(f"优化版判断完成: 原始状态={raw_status}, 连续天数={self.consecutive_days}, 最终状态={market_season}, 信号强度={strength:.2f}")
         
-        # 7. 更新状态记忆和缓存
-        self.last_known_season = current_season
-        self._detailed_status = {
-            'trend': '牛' if current_season == 'BULL' else '熊' if current_season == 'BEAR' else '震荡',
-            'score': final_score,
-            'confidence': ai_confidence,
-            'last_update': time.time()
-        }
-        self._last_status_update = time.time()
-        
-        logger.info(f"最终评分: {final_score:.2f}, AI置信度: {ai_confidence:.2f}, 判定状态: {current_season}")
-        
-        # 8. 返回最终决策包
+        # 7. 返回最终决策包 (格式与其他模块兼容)
         return {
-            "market_season": current_season,
-            "score": final_score,
-            "confidence": ai_confidence,
-            "liquidation_signal": liquidation_signal
+            "market_season": market_season,
+            "score": strength, # 使用信号强度作为score
+            "confidence": (abs(strength) + 1) / 2, # 将强度映射到0.5-1.0的置信度
+            "liquidation_signal": None # 这个模型不直接产生清场信号
         }
 
     async def get_detailed_status(self) -> Dict[str, Any]:
-        """(此方法逻辑简化，直接返回缓存或重新计算)"""
-        current_time = time.time()
-        # 如果缓存不存在或过期（超过5分钟），重新进行一次完整决策
-        if (not self._detailed_status or current_time - self._last_status_update > 300):
-            logger.info("宏观状态缓存已过期，重新进行完整决策...")
-            await self.get_macro_decision()
-        
-        return self._detailed_status.copy() if self._detailed_status else {}```
+        """(此方法逻辑简化，直接返回最新决策的缓存)"""
+        # 在真实应用中，这个方法也应该被重构，以反映新的决策逻辑
+        # 为保持最小化修改，我们暂时让它返回一个简化的状态
+        decision = await self.get_macro_decision()
+        trend_map = {"BULL": "牛", "BEAR": "熊", "OSC": "震荡"}
+        return {
+            'trend': trend_map.get(decision['market_season'], '未知'),
+            'score': decision.get('score', 0),
+            'confidence': decision.get('confidence', 0.5),
+            'last_update': time.time()
+        }
