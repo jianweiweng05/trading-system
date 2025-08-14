@@ -1,4 +1,3 @@
-
 import logging
 from typing import Optional
 from pydantic import Field, validator
@@ -30,11 +29,15 @@ class Settings(BaseSettings):
 
     trading_engine: bool = Field(default=True, env="TRADING_ENGINE")
 
-    default_btc_status: str = Field(default="neutral", env="DEFAULT_BTC_STATUS")
-    default_eth_status: str = Field(default="neutral", env="DEFAULT_ETH_STATUS")
-    status_update_interval: int = Field(default=3600, env="STATUS_UPDATE_INTERVAL")
+    # --- 【核心修改】移除了不再需要的旧宏观系统配置 ---
+    # default_btc_status: str = Field(default="neutral", env="DEFAULT_BTC_STATUS")
+    # default_eth_status: str = Field(default="neutral", env="DEFAULT_ETH_STATUS")
+    # status_update_interval: int = Field(default=3600, env="STATUS_UPDATE_INTERVAL")
+    # macro_cache_timeout: int = Field(default=300, env="MACRO_CACHE_TIMEOUT")
+    
+    # --- 【核心新增】为新的 MacroAnalyzer 添加因子文件路径配置 ---
+    factor_history_file: str = Field(default="factor_history_full.csv", env="FACTOR_HISTORY_FILE")
 
-    macro_cache_timeout: int = Field(default=300, env="MACRO_CACHE_TIMEOUT")
     db_retry_attempts: int = Field(default=3, env="DB_RETRY_ATTEMPTS")
     db_retry_delay: float = Field(default=1.0, env="DB_RETRY_DELAY")
 
@@ -43,7 +46,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
 
-    # --- 【修改】移除了与 firepower 和 allocation 相关的验证器 ---
+    # --- 验证器部分 (移除了与已删除字段相关的验证器) ---
     
     @validator('alert_order_timeout')
     def validate_alert_order_timeout(cls, v):
@@ -81,19 +84,6 @@ class Settings(BaseSettings):
             raise ValueError("报警冷却时间必须在60-3600秒之间")
         return v
 
-    @validator('default_btc_status', 'default_eth_status')
-    def validate_default_status(cls, v):
-        allowed_values = {"bullish", "bearish", "neutral"}
-        if v not in allowed_values:
-            raise ValueError(f"默认状态必须是以下之一: {allowed_values}")
-        return v
-
-    @validator('macro_cache_timeout')
-    def validate_macro_cache_timeout(cls, v):
-        if not 60 <= v <= 3600:
-            raise ValueError("宏观状态缓存时间必须在60-3600秒之间")
-        return v
-
     @validator('db_retry_attempts')
     def validate_db_retry_attempts(cls, v):
         if not 1 <= v <= 10:
@@ -116,7 +106,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 添加启动时的调试日志
+# 启动时的调试日志 (保持不变)
 logger.info("--- [Config Debug] ---")
 logger.info(f"DISCORD_ALERT_WEBHOOK loaded as: {CONFIG.discord_alert_webhook}")
 logger.info(f"Type of DISCORD_ALERT_WEBHOOK is: {type(CONFIG.discord_alert_webhook)}")
