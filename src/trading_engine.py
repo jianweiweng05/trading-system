@@ -53,10 +53,150 @@ class TradingEngine:
         await self._load_resonance_pool_from_db()
         logger.info("✅ 交易引擎初始化完成")
 
+    async def _check_balance(self, symbol: str, amount: float, price: Optional[float] = None):
+        """检查账户余额"""
+        try:
+            balance = await self.exchange.fetch_balance()
+            if price:
+                required = amount * price
+            else:
+                ticker = await self.exchange.fetch_ticker(symbol)
+                required = amount * ticker['last']
+            
+            if symbol in balance['total']:
+                available = balance['total'][symbol]
+                if available >= required:
+                    return True
+            return False
+        except Exception as e:
+            logger.error(f"检查余额失败: {str(e)}")
+            return False
+
+    async def _execute_with_retry(self, func, max_retries: int = 3) -> Any:
+        """带重试的执行函数"""
+        for i in range(max_retries):
+            try:
+                return await func()
+            except Exception as e:
+                if i == max_retries - 1:
+                    raise
+                logger.warning(f"执行失败，准备重试 ({i + 1}/{max_retries}): {str(e)}")
+                await asyncio.sleep(2 ** i)
+
+    async def _monitor_order(self, order_id: str):
+        """监控订单状态"""
+        while True:
+            try:
+                order = await self.exchange.fetch_order(order_id)
+                if order['status'] == 'closed':
+                    return order
+                elif order['status'] == 'canceled':
+                    return None
+                await asyncio.sleep(self.ORDER_CHECK_INTERVAL)
+            except Exception as e:
+                logger.error(f"监控订单失败: {str(e)}")
+                await asyncio.sleep(self.ORDER_CHECK_INTERVAL)
+
+    async def cancel_order(self, order_id: str) -> bool:
+        """取消订单"""
+        try:
+            await self.exchange.cancel_order(order_id)
+            return True
+        except Exception as e:
+            logger.error(f"取消订单失败: {str(e)}")
+            return False
+
+    async def get_position(self, symbol: str) -> Dict[str, Any]:
+        """获取持仓信息"""
+        try:
+            return await self.exchange.fetch_position(symbol)
+        except Exception as e:
+            logger.error(f"获取持仓信息失败: {str(e)}")
+            return {}
+
+    def update_daily_pnl(self, pnl: float):
+        """更新每日盈亏"""
+        self.daily_pnl += pnl
+        self.daily_trades += 1
+
+    def reset_daily_stats(self):
+        """重置每日统计"""
+        self.daily_pnl = 0.0
+        self.daily_trades = 0
+        self.last_reset_time = time.time()
+
+    async def check_exchange_health(self) -> bool:
+        """检查交易所连接状态"""
+        try:
+            await self.exchange.fetch_status()
+            return True
+        except Exception as e:
+            logger.error(f"交易所连接检查失败: {str(e)}")
+            return False
+
+    def get_active_orders(self) -> Dict[str, Dict]:
+        """获取活跃订单"""
+        return self.active_orders
+
+    def get_daily_stats(self) -> Dict[str, Any]:
+        """获取每日统计"""
+        return {
+            'daily_pnl': self.daily_pnl,
+            'daily_trades': self.daily_trades,
+            'last_reset_time': self.last_reset_time
+        }
+
+    async def add_signal(self, signal_id: str, signal_data: Dict[str, Any]) -> None:
+        """添加信号到共振池"""
+        self.resonance_pool[signal_id] = signal_data
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                insert(ResonanceSignal).values(
+                    signal_id=signal_id,
+                    signal_data=signal_data
+                )
+            )
+
+    async def remove_signal(self, signal_id: str) -> None:
+        """从共振池移除信号"""
+        if signal_id in self.resonance_pool:
+            del self.resonance_pool[signal_id]
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    delete(ResonanceSignal).where(
+                        ResonanceSignal.signal_id == signal_id
+                    )
+                )
+
+    def get_resonance_pool(self) -> Dict[str, Any]:
+        """获取共振池状态"""
+        return self.resonance_pool
+
+    async def update_signal_status(self, signal_id: str, status: str) -> None:
+        """更新信号状态"""
+        if signal_id in self.resonance_pool:
+            self.resonance_pool[signal_id]['status'] = status
+            async with db_pool.acquire() as conn:
+                await conn.execute(
+                    update(ResonanceSignal).where(
+                        ResonanceSignal.signal_id == signal_id
+                    ).values(
+                        status=status
+                    )
+                )
+
+    async def _load_resonance_pool_from_db(self):
+        """从数据库加载共振池"""
+        try:
+            async with db_pool.acquire() as conn:
+                result = await conn.execute(select(ResonanceSignal))
+                for row in result:
+                    self.resonance_pool[row.signal_id] = row.signal_data
+        except Exception as e:
+            logger.error(f"从数据库加载共振池失败: {str(e)}")
+
     # --- 【核心修改】execute_order 被彻底重构，以整合新的决策逻辑 ---
     async def execute_order(self, symbol: str, side: str, 
-                          # 不再需要外部传入amount, order_type, price
-                          # 这些将由内部逻辑决定
                           signal_data: Dict[str, Any] 
                          ) -> Optional[Dict[str, Any]]:
         """
@@ -76,24 +216,21 @@ class TradingEngine:
                 return None
 
             # 3. 获取所有需要的系数来计算仓位
-            # (这里需要获取账户权益和当前回撤，假设有辅助函数)
-            account_equity = await self.exchange.fetch_balance()['total']['USDT']
-            current_drawdown = await get_current_drawdown_from_db() # 假设
+            account_balance = await self.exchange.fetch_balance()
+            account_equity = account_balance['total']['USDT']
+            
+            # 获取当前回撤（简化处理，实际应该从数据库获取）
+            current_drawdown = 0.0
 
             allocation_percent = get_allocation_percent(macro_status, symbol)
             dynamic_risk_coeff = get_dynamic_risk_coefficient(current_drawdown)
             
-            # (简化版，暂时不考虑共振和AI置信度，因为它们已在宏观评分中)
-            resonance_multiplier = 1.0
-            
             # 4. 计算最终仓位价值
-            # (调用我们core_logic.py中的函数)
             position_details = calculate_target_position_value(
                 account_equity=account_equity,
                 symbol=symbol,
                 macro_decision=macro_decision,
-                dynamic_risk_coeff=dynamic_risk_coeff,
-                # ... 其他需要的参数 ...
+                dynamic_risk_coeff=dynamic_risk_coeff
             )
             
             target_value = position_details["target_position_value"]
@@ -102,16 +239,25 @@ class TradingEngine:
                 return None
 
             # 5. 执行下单
-            # (这里的逻辑与您原始的execute_order类似)
             current_price = await self.exchange.fetch_ticker(symbol)['last']
             amount = target_value / current_price
+            
+            # 检查余额
+            if not await self._check_balance(symbol, amount, current_price):
+                logger.warning(f"余额不足，无法执行订单: {symbol} {amount}")
+                return None
             
             order_params = {'symbol': symbol, 'type': 'market', 'side': side, 'amount': amount}
             order_result = await self._execute_with_retry(
                 lambda: self.exchange.create_order(**order_params)
             )
             
-            # ... (后续的订单监控逻辑) ...
+            if order_result:
+                self.active_orders[order_result['id']] = order_result
+                # 更新每日统计
+                self.update_daily_pnl(0)  # 实际应该计算实际盈亏
+                # 启动订单监控
+                asyncio.create_task(self._monitor_order(order_result['id']))
             
             return order_result
 
@@ -119,75 +265,4 @@ class TradingEngine:
             await self.alert_system.trigger_alert(
                 alert_type="ORDER_FAILED", message=f"交易执行失败: {str(e)}", level="emergency"
             )
-            # 不再向上抛出异常，而是返回None，避免主循环崩溃
             return None
-    
-    async def _check_balance(self, symbol: str, amount: float, price: Optional[float] = None):
-        """(此方法保持不变)"""
-        # ...
-    
-    async def _execute_with_retry(self, func, max_retries: int = 3) -> Any:
-        """(此方法保持不变)"""
-        # ...
-    
-    async def _monitor_order(self, order_id: str):
-        """(此方法保持不变)"""
-        # ...
-    
-    async def cancel_order(self, order_id: str) -> bool:
-        """(此方法保持不变)"""
-        # ...
-    
-    async def get_position(self, symbol: str) -> Dict[str, Any]:
-        """(此方法保持不变)"""
-        # ...
-    
-    def update_daily_pnl(self, pnl: float):
-        """(此方法保持不变)"""
-        # ...
-    
-    def reset_daily_stats(self):
-        """(此方法保持不变)"""
-        # ...
-    
-    async def check_exchange_health(self) -> bool:
-        """(此方法保持不变)"""
-        # ...
-    
-    def get_active_orders(self) -> Dict[str, Dict]:
-        """(此方法保持不变)"""
-        # ...
-    
-    def get_daily_stats(self) -> Dict[str, Any]:
-        """(此方法保持不变)"""
-        # ...
-    
-    async def add_signal(self, signal_id: str, signal_data: Dict[str, Any]) -> None:
-        """(此方法保持不变)"""
-        # ...
-
-    async def remove_signal(self, signal_id: str) -> None:
-        """(此方法保持不变)"""
-        # ...
-
-    def get_resonance_pool(self) -> Dict[str, Any]:
-        """(此方法保持不变)"""
-        # ...
-
-    async def update_signal_status(self, signal_id: str, status: str) -> None:
-        """(此方法保持不变)"""
-        # ...
-
-    async def _load_resonance_pool_from_db(self):
-        """(此方法保持不变)"""
-        # ...
-
-    # --- 【核心修改】旧的宏观状态管理函数被彻底废弃 ---
-    # async def get_macro_status(self) -> Dict[str, Any]: ...
-    # def update_macro_status(self, ...) -> None: ...
-    
-    # (get_resonance_pool 的异步版本保持不变)
-    async def get_resonance_pool(self) -> Dict[str, Any]:
-        """获取共振池状态"""
-        # ... (与原始代码相同) ...
-        pass
