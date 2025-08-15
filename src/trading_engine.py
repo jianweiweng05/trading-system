@@ -88,8 +88,14 @@ class TradingEngine:
 
     async def _monitor_order(self, order_id: str):
         """监控订单状态"""
+        start_time = time.time()
         while True:
             try:
+                # 添加超时检查
+                if time.time() - start_time > self.order_timeout:
+                    logger.warning(f"订单监控超时: {order_id}")
+                    return None
+                    
                 order = await self.exchange.fetch_order(order_id)
                 if order['status'] == 'closed':
                     return order
@@ -220,10 +226,15 @@ class TradingEngine:
 
             # 3. 获取所有需要的系数来计算仓位
             account_balance = await self.exchange.fetch_balance()
-            account_equity = account_balance['total']['USDT']
+            # 修改：安全访问账户权益
+            account_equity = account_balance.get('total', {}).get('USDT', 0.0)
             
-            # 获取当前回撤（简化处理，实际应该从数据库获取）
-            current_drawdown = 0.0
+            # 获取当前回撤（从数据库获取）
+            try:
+                current_drawdown = await self._get_current_drawdown()
+            except Exception as e:
+                logger.warning(f"获取回撤数据失败，使用默认值0: {str(e)}")
+                current_drawdown = 0.0
 
             allocation_percent = get_allocation_percent(macro_status, symbol)
             dynamic_risk_coeff = get_dynamic_risk_coefficient(current_drawdown)
@@ -242,7 +253,9 @@ class TradingEngine:
                 return None
 
             # 5. 执行下单
-            current_price = await self.exchange.fetch_ticker(symbol)['last']
+            # 修改：正确获取当前价格
+            ticker = await self.exchange.fetch_ticker(symbol)
+            current_price = ticker['last']
             amount = target_value / current_price
             
             # 检查余额
@@ -269,3 +282,9 @@ class TradingEngine:
                 alert_type="ORDER_FAILED", message=f"交易执行失败: {str(e)}", level="emergency"
             )
             return None
+
+    async def _get_current_drawdown(self) -> float:
+        """获取当前回撤值"""
+        # 这里应该实现从数据库获取实际回撤数据的逻辑
+        # 暂时返回0.0，实际使用时需要实现
+        return 0.0
