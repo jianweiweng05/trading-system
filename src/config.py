@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # macro_cache_timeout: int = Field(default=300, env="MACRO_CACHE_TIMEOUT")
     
     # --- 【核心新增】为新的 MacroAnalyzer 添加因子文件路径配置 ---
-    factor_history_file: str = Field(default="factor_history_full.csv", env="FACTOR_HISTORY_FILE")
+    factor_history_file: str = Field(default="./data/factor_history_full.csv", env="FACTOR_HISTORY_FILE")
 
     db_retry_attempts: int = Field(default=3, env="DB_RETRY_ATTEMPTS")
     db_retry_delay: float = Field(default=1.0, env="DB_RETRY_DELAY")
