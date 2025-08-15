@@ -122,7 +122,6 @@ async def lifespan(app: FastAPI):
         await SystemState.set_state("ERROR")
         raise
     finally:
-        # ... (finally 块保持不变) ...
         logger.info("🛑 系统关闭中...")
         await SystemState.set_state("SHUTDOWN")
         # ... (关闭逻辑保持不变) ...
@@ -142,9 +141,62 @@ async def root() -> Dict[str, Any]:
 
 @app.get("/health")
 async def health_check(request: Request) -> Dict[str, Any]:
-    """(此函数保持不变)"""
-    # ...
-    pass
+    """健康检查接口"""
+    try:
+        # 获取系统状态
+        system_state = await SystemState.get_state()
+        
+        # 检查数据库连接
+        db_status = False
+        try:
+            async with db_pool.get_session() as session:
+                await session.execute(text("SELECT 1"))
+                db_status = True
+        except Exception as e:
+            logger.error(f"数据库健康检查失败: {e}")
+        
+        # 检查交易所连接
+        exchange_status = False
+        try:
+            if hasattr(request.app.state, 'exchange'):
+                await request.app.state.exchange.fetch_status()
+                exchange_status = True
+        except Exception as e:
+            logger.error(f"交易所健康检查失败: {e}")
+        
+        # 检查交易引擎状态
+        trading_engine_status = hasattr(request.app.state, 'trading_engine')
+        
+        # 检查报警系统状态
+        alert_system_status = hasattr(request.app.state, 'alert_system')
+        
+        # 检查宏观分析器状态
+        macro_analyzer_status = hasattr(request.app.state, 'macro_analyzer')
+        
+        # 确定整体健康状态
+        overall_status = "healthy"
+        if not all([db_status, exchange_status]):
+            overall_status = "unhealthy"
+        
+        return {
+            "status": overall_status,
+            "system_state": system_state,
+            "components": {
+                "database": db_status,
+                "exchange": exchange_status,
+                "trading_engine": trading_engine_status,
+                "alert_system": alert_system_status,
+                "macro_analyzer": macro_analyzer_status
+            },
+            "timestamp": time.time()
+        }
+    except Exception as e:
+        logger.error(f"健康检查失败: {e}", exc_info=True)
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": time.time()
+        }
 
 # --- 【核心修改】彻底重构 Webhook 逻辑 ---
 @app.post("/webhook/tradingview")
@@ -194,10 +246,14 @@ async def tradingview_webhook(request: Request):
 @app.get("/tv-status")
 async def get_tv_status():
     """(此函数现在只用于监控，不再影响交易)"""
-    # ... (与原始代码相同) ...
-    pass
+    try:
+        current_state = await SystemState.get_state()
+        return {"status": current_state}
+    except Exception as e:
+        logger.error(f"获取TV状态失败: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
 
-# --- 主函数 (无变 động) ---
+# --- 主函数 (无变动) ---
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     logger.info(f"启动服务器，端口: {port}")
