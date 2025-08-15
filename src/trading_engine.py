@@ -118,6 +118,10 @@ class TradingEngine:
     async def get_position(self, symbol: str) -> Dict[str, Any]:
         """获取持仓信息"""
         try:
+            # 添加交易对符号验证
+            if not symbol or symbol == "*":
+                logger.error("无效的交易对符号")
+                return {}
             return await self.exchange.fetch_position(symbol)
         except Exception as e:
             logger.error(f"获取持仓信息失败: {str(e)}")
