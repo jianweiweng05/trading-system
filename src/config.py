@@ -29,11 +29,8 @@ class Settings(BaseSettings):
 
     trading_engine: bool = Field(default=True, env="TRADING_ENGINE")
 
-    # --- 【核心修改】移除了不再需要的旧宏观系统配置 ---
-    # default_btc_status: str = Field(default="neutral", env="DEFAULT_BTC_STATUS")
-    # default_eth_status: str = Field(default="neutral", env="DEFAULT_ETH_STATUS")
-    # status_update_interval: int = Field(default=3600, env="STATUS_UPDATE_INTERVAL")
-    # macro_cache_timeout: int = Field(default=300, env="MACRO_CACHE_TIMEOUT")
+    # --- 【核心修改】恢复 macro_cache_timeout 配置项 ---
+    macro_cache_timeout: int = Field(default=300, env="MACRO_CACHE_TIMEOUT")
     
     # --- 【核心新增】为新的 MacroAnalyzer 添加因子文件路径配置 ---
     factor_history_file: str = Field(default="./data/factor_history_full.csv", env="FACTOR_HISTORY_FILE")
