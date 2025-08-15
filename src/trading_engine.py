@@ -45,7 +45,7 @@ class TradingEngine:
         logger.info("✅ 交易引擎初始化完成")
 
     # --- 【核心修改】execute_order 被彻底重写 ---
-    async def execute_order(self, signal_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def execute_order(self, signal_data: Dict[str, Any], account_equity: float, current_drawdown: float) -> Optional[Dict[str, Any]]:
         """
         执行交易决策的统一入口。
         """
@@ -67,22 +67,16 @@ class TradingEngine:
             market_dir = 1 if macro_status == "BULL" else -1 if macro_status == "BEAR" else 0
             signal_dir = 1 if action.lower() == 'long' else -1 if action.lower() == 'short' else 0
             
-            if market_dir != signal_dir:
+            if market_dir != 0 and market_dir != signal_dir:  # 修正方向过滤逻辑
                 logger.info(f"信号被过滤: 策略 {strategy_id} 的 {action} 信号与宏观主方向({macro_status})不符。")
                 return None
 
             # 4. 获取所有需要的系数来计算仓位
-            # (这里需要获取账户权益和当前回撤，我们先用模拟值)
-            # account_equity = (await self.exchange.fetch_balance())['total']['USDT']
-            account_equity = 100000.0 # 模拟值
-            # current_drawdown = await get_current_drawdown_from_db()
-            current_drawdown = 0.0 # 模拟值
-
             allocation_percent = get_allocation_percent(macro_status, symbol)
             dynamic_risk_coeff = get_dynamic_risk_coefficient(current_drawdown)
             
-            # (共振系统暂时简化为1.0)
-            resonance_multiplier = 1.0
+            # 重新引入共振系统
+            resonance_multiplier = await self.get_resonance_decision(symbol)
             
             # 5. 调用core_logic中的函数，计算最终仓位价值
             position_details = calculate_target_position_value(
@@ -105,10 +99,19 @@ class TradingEngine:
             current_price = (await self.exchange.fetch_ticker(symbol))['last']
             amount = target_value / current_price
             
+            # 增加订单参数合规性检查
+            if amount < self.exchange.markets[symbol]['limits']['amount']['min']:
+                logger.warning(f"下单数量 {amount} 小于交易所最小限制，订单取消")
+                return None
+            
             order_params = {'symbol': symbol, 'type': 'market', 'side': action, 'amount': amount}
             order_result = await self._execute_with_retry(
                 lambda: self.exchange.create_order(**order_params)
             )
+            
+            if not order_result:  # 增加返回值检查
+                logger.error("订单创建失败")
+                return None
             
             self.active_orders[order_result['id']] = {
                 'symbol': symbol, 'type': 'market', 'side': action, 'amount': amount,
@@ -126,7 +129,57 @@ class TradingEngine:
             )
             return None
     
-    # --- (以下所有方法，都100%保持了您原始代码的原貌) ---
+    # --- 以下方法根据需要进行修改 ---
+    
+    async def _monitor_order(self, order_id: str):
+        """实现订单监控逻辑"""
+        try:
+            while True:
+                order_info = await self.exchange.fetch_order(order_id)
+                status = order_info['status']
+                
+                if status in ['closed', 'canceled', 'expired']:
+                    # 订单已完成，从active_orders中移除
+                    if order_id in self.active_orders:
+                        del self.active_orders[order_id]
+                    break
+                
+                # 检查订单超时
+                if time.time() - self.active_orders[order_id]['timestamp'] > self.order_timeout:
+                    await self.cancel_order(order_id)
+                    break
+                
+                await asyncio.sleep(self.ORDER_CHECK_INTERVAL)
+                
+        except Exception as e:
+            logger.error(f"监控订单 {order_id} 失败: {e}")
+            if order_id in self.active_orders:
+                del self.active_orders[order_id]
+    
+    async def get_resonance_decision(self, symbol: str) -> float:
+        """获取当前交易对的共振系数"""
+        try:
+            # 获取该交易对的所有活跃信号
+            symbol_signals = [
+                signal for signal in self.resonance_pool.values()
+                if signal['symbol'] == symbol and signal['status'] == 'pending'
+            ]
+            
+            if not symbol_signals:
+                return 1.0
+            
+            # 计算共振系数
+            total_strength = sum(signal['strength'] for signal in symbol_signals)
+            avg_strength = total_strength / len(symbol_signals)
+            
+            # 将强度映射到0.5-1.5的系数范围
+            return 0.5 + (avg_strength / 100)
+            
+        except Exception as e:
+            logger.error(f"计算共振系数失败: {e}")
+            return 1.0
+    
+    # --- (以下所有方法保持原样) ---
     
     async def _check_balance(self, symbol: str, amount: float, price: Optional[float] = None):
         try:
@@ -170,9 +223,6 @@ class TradingEngine:
                     await asyncio.sleep(1 * (i + 1))
                     continue
         raise last_error
-    
-    async def _monitor_order(self, order_id: str):
-        pass
     
     async def cancel_order(self, order_id: str) -> bool:
         try:
