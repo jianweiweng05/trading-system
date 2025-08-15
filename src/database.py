@@ -7,7 +7,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import (
     Column, Integer, String, Float, DateTime, MetaData, 
-    select, insert, update, delete, func, Text, text # 【修改】补上了 insert, update, delete
+    select, insert, update, delete, func, Text, text
 )
 
 logger = logging.getLogger(__name__)
@@ -74,16 +74,13 @@ class ResonanceSignal(Base):
     status = Column(String, nullable=False, default='pending', index=True)
     created_at = Column(DateTime, default=func.now())
 
-# --- 【新增代码开始】---
-# 根据建议，添加缺失的 TVStatus 表定义
 class TVStatus(Base):
     __tablename__ = 'tv_status'
     symbol = Column(String, primary_key=True)
     status = Column(String, nullable=False)
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
-# --- 【新增代码结束】---
     
-from contextlib import asynccontextmanager # 确保这个导入在文件顶部
+from contextlib import asynccontextmanager
 
 class DatabaseConnectionPool:
     def __init__(self, engine: AsyncEngine):
@@ -109,6 +106,15 @@ class DatabaseConnectionPool:
             raise
         finally:
             await session.close()
+
+    # 添加 acquire 方法以支持原有的使用方式
+    @asynccontextmanager
+    async def acquire(self) -> AsyncGenerator[AsyncSession, None]:
+        """
+        为了兼容原有代码而添加的 acquire 方法，内部调用 get_session
+        """
+        async with self.get_session() as session:
+            yield session
 
 db_pool = DatabaseConnectionPool(engine)
 
@@ -147,8 +153,6 @@ async def check_database_health() -> bool:
     except Exception as e:
         logger.error(f"数据库健康检查失败: {str(e)}", exc_info=True)
         return False
-
-# --- 【修改】所有数据库操作函数统一使用 db_pool.get_session() ---
 
 async def get_setting(key: str, default_value: Optional[str] = None) -> Optional[str]:
     """获取设置项"""
@@ -200,7 +204,7 @@ async def log_trade(symbol: str, quantity: float, entry_price: float,
             )
             session.add(new_trade)
             await session.commit()
-            await session.refresh(new_trade) # 获取自增 ID
+            await session.refresh(new_trade)
             logger.info(f"记录交易: {symbol} {trade_type} {quantity} @ {entry_price} (ID: {new_trade.id})")
             return new_trade.id
     except Exception as e:
@@ -223,7 +227,7 @@ async def close_trade(trade_id: int, exit_price: float) -> bool:
             return False
     except Exception as e:
         logger.error(f"平仓失败: {str(e)}", exc_info=True)
-        raise # 【修改】重新抛出异常
+        raise
 
 async def get_trade_history(symbol: Optional[str] = None, limit: Optional[int] = 10) -> List[Trade]:
     """获取交易历史"""
@@ -252,8 +256,6 @@ async def get_position_by_symbol(symbol: str) -> Optional[Trade]:
         logger.error(f"获取持仓失败: {str(e)}", exc_info=True)
         return None
 
-# --- 【新增代码开始】---
-# 根据建议，添加用于更新 TV 信号状态的函数
 async def update_tv_status(symbol: str, status: str) -> None:
     """
     更新或插入一个交易对的TV信号状态。
@@ -274,4 +276,3 @@ async def update_tv_status(symbol: str, status: str) -> None:
     except Exception as e:
         logger.error(f"更新 TV 状态失败: {symbol} -> {status}, 错误: {e}", exc_info=True)
         raise
-# --- 【新增代码结束】---
