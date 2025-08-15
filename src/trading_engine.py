@@ -23,7 +23,7 @@ class TradingEngine:
     
     ORDER_CHECK_INTERVAL = 1
     
-    def __init__(self, exchange: binance, alert_system: AlertSystem):
+    def __init__(self, exchange: binance, alert_system: AlertSystem, macro_analyzer: Optional[MacroAnalyzer] = None):
         self.exchange = exchange
         self.alert_system = alert_system
         self.active_orders: Dict[str, Dict] = {}
@@ -41,9 +41,12 @@ class TradingEngine:
         self.signal_timeout = CONFIG.macro_cache_timeout
         
         # --- 【核心修改】实例化新的宏观分析器 ---
-        # 假设因子文件路径在配置中
-        factor_file_path = getattr(CONFIG, 'factor_history_file', 'factor_history_full.csv')
-        self.macro_analyzer = MacroAnalyzer(CONFIG.deepseek_api_key, factor_file_path)
+        # 如果外部传入了macro_analyzer则使用外部的，否则自己创建
+        if macro_analyzer is not None:
+            self.macro_analyzer = macro_analyzer
+        else:
+            factor_file_path = getattr(CONFIG, 'factor_history_file', 'factor_history_full.csv')
+            self.macro_analyzer = MacroAnalyzer(CONFIG.deepseek_api_key, factor_file_path)
 
     async def initialize(self) -> None:
         """
