@@ -135,8 +135,10 @@ class TradingCommands(commands.Cog, name="TradingCommands"):
 
             pool_text = "⚪ 未启用"
             if trading_engine:
-                pool_data = await trading_engine.get_resonance_pool()
-                pool_text = f"⏳ {pool_data.get('pending_count', 0)} 个待处理"
+                # 【核心修改】移除 await，因为 get_resonance_pool 不是异步方法
+                pool_data = trading_engine.get_resonance_pool()
+                pending_count = sum(1 for signal in pool_data.values() if signal.get('status') == 'pending')
+                pool_text = f"⏳ {pending_count} 个待处理"
             embed.add_field(name="📡 共振池", value=pool_text, inline=True)
 
             embed.set_footer(text=f"模式: {CONFIG.run_mode.upper()} | 最后刷新于")
